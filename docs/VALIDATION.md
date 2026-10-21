@@ -1,5 +1,13 @@
 # Validation — 2026-10-21
 
+## Owner log on 0.1.5-diag
+
+With the radio stopped for the refresh, the first automatic refresh completed on USB power: `refresh` from t=22.5 s to `power_off` at t=42.8 s (about 20 s), `complete ok=1`, no reset, radio back with the office IP. One run only; repeat refreshes are pending.
+
+Factory dump inspection (local analysis only, not stored in the repository): the factory app is an ESP-AT based Good Display demo ("E-paper Display WiFi Network Status", ESP-IDF 4.4.2, built 2022). The `spiffs` data partition at 0x290000 is entirely erased (0xFF), so formatting it loses no factory data; LittleFS reports `Corrupted dir pair` on erased flash. The factory panel driver was not disassembled.
+
+Working explanation, not measured: AP+STA keeps the radio fully on (no modem sleep with an active AP), and that current together with the panel booster during the four-colour waveform exceeds what the board's 3.3 V path supplies; the panel alone does not. A rail measurement would confirm it.
+
 ## Owner log on 0.1.4-diag and update 0.1.5-diag
 
 Facts from the owner's serial log (USB power, battery disconnected):
