@@ -6,6 +6,9 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <esp_system.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
 #if !AVIOR_RECOVERY
@@ -34,6 +37,31 @@ uint32_t lastHealth=0;
 esp_reset_reason_t bootReason=ESP_RST_UNKNOWN;
 bool scanActive=false;
 uint32_t scanStarted=0;
+struct WifiSnapshot {
+  WifiEvidence evidence{};
+  IPAddress address;
+  esp_err_t modeError=ESP_OK,associationError=ESP_OK,ipError=ESP_OK;
+  StationState state()const{return stationState(evidence);}
+};
+WifiSnapshot wifiSnapshot(){
+  WifiSnapshot s;wifi_mode_t mode=WIFI_MODE_NULL;
+  s.evidence.arduinoStatus=(int)WiFi.status();
+  s.modeError=esp_wifi_get_mode(&mode);s.evidence.modeKnown=s.modeError==ESP_OK;
+  s.evidence.stationEnabled=s.evidence.modeKnown&&(mode==WIFI_MODE_STA||mode==WIFI_MODE_APSTA);
+  if(s.evidence.stationEnabled){
+    wifi_ap_record_t ap{};
+    s.associationError=esp_wifi_sta_get_ap_info(&ap);
+    s.evidence.associationKnown=s.associationError==ESP_OK||s.associationError==ESP_ERR_WIFI_NOT_CONNECT;
+    s.evidence.associated=s.associationError==ESP_OK;
+    esp_netif_t* netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip{};
+    s.evidence.interfaceUp=netif&&esp_netif_is_netif_up(netif);
+    s.ipError=netif?esp_netif_get_ip_info(netif,&ip):ESP_ERR_NOT_FOUND;
+    s.evidence.hasAddress=s.ipError==ESP_OK&&ip.ip.addr!=0;
+    if(s.evidence.hasAddress)s.address=IPAddress(ip.ip.addr);
+  }
+  return s;
+}
 const char* resetName(esp_reset_reason_t r){
   switch(r){
     case ESP_RST_POWERON:return "power_on";
@@ -112,11 +140,16 @@ void requestDisplay(){
   rendering=true;if(xQueueSend(jobs,&desired,0)!=pdTRUE)rendering=false;
 }
 void state(){
+  WifiSnapshot wifi=wifiSnapshot();
   JsonDocument d;d["version"]=FW_VERSION;d["recovery"]=RECOVERY_MODE;d["mode"]=MODE_NAME;d["wifiSetupAllowed"]=canMutate(true);d["resetReason"]=resetName(bootReason);d["resetReasonCode"]=(int)bootReason;d["board"]="ESP32-M075 V3.0";d["panel"]="GDEM075F53 / JD79665CA";
   d["desired"]=keys[desired];d["displayed"]=displayed<0?"unknown":keys[displayed];d["busy"]=rendering.load();
   d["displayError"]=displayError;d["hardwareConfirmed"]=confirmed;d["storageReady"]=fsReady;
-  d["automatic"]=automatic;d["source"]=source;d["ip"]=WiFi.localIP().toString();d["apIP"]=WiFi.softAPIP().toString();
-  d["wifiConnected"]=WiFi.status()==WL_CONNECTED;d["timeValid"]=time(nullptr)>1700000000;
+  d["automatic"]=automatic;d["source"]=source;d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"0.0.0.0";d["apIP"]=WiFi.softAPIP().toString();
+  d["wifiConnected"]=wifi.state()==StationState::Connected;d["wifiStatus"]=stationStateName(wifi.state());
+  d["wifiArduinoStatus"]=wifi.evidence.arduinoStatus;d["wifiAssociated"]=wifi.evidence.associated;
+  d["wifiNetifUp"]=wifi.evidence.interfaceUp;d["wifiHasAddress"]=wifi.evidence.hasAddress;
+  d["wifiModeError"]=wifi.modeError;d["wifiAssociationError"]=wifi.associationError;d["wifiIpError"]=wifi.ipError;
+  d["timeValid"]=time(nullptr)>1700000000;
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["cooldownSeconds"]=lastRefresh&&millis()-lastRefresh<60000?(60000-(millis()-lastRefresh))/1000:0;
   auto assets=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)assets[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));reply(200,d);
@@ -260,7 +293,8 @@ void loop(){
   }
   if(millis()-lastHealth>=5000){
     lastHealth=millis();
-    Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),(int)WiFi.status(),resetName(bootReason),(int)bootReason);
+    WifiSnapshot wifi=wifiSnapshot();
+    Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%s arduino_wifi=%d ip=%s associated=%d netif_up=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),stationStateName(wifi.state()),wifi.evidence.arduinoStatus,wifi.state()==StationState::Connected?wifi.address.toString().c_str():"0.0.0.0",wifi.evidence.associated,wifi.evidence.interfaceUp,resetName(bootReason),(int)bootReason);
   }
   delay(2);
 }

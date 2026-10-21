@@ -5,7 +5,7 @@ import json
 import time
 
 root=Path(__file__).resolve().parents[1]
-state={'version':'0.1.2','desired':'closed','displayed':'closed','busy':False,
+state={'version':'0.1.3','desired':'closed','displayed':'closed','busy':False,
        'displayError':'','hardwareConfirmed':False,'storageReady':False,
        'automatic':False,'source':'manual','ip':'192.168.1.42','apIP':'192.168.4.1',
        'wifiConnected':True,'timeValid':True,'cooldownSeconds':0,'assets':{}}

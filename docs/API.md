@@ -8,6 +8,10 @@ Version 0.1.1 adds `recovery`, `resetReason` and `resetReasonCode` to state. The
 
 Version 0.1.2 adds `mode` and `wifiSetupAllowed`. The new `recovery-wifi` profile permits only authenticated Wi-Fi setup and scan operations for the next isolation test; every other mutation remains HTTP 423. It starts AP only: a scan enables STA for discovery without connecting, and `PUT /wifi` enables STA and initiates connection. Saved credentials do not trigger a connection on boot in this profile.
 
+Version 0.1.3 changes connectivity reporting to a sampled SDK snapshot: operating mode from `esp_wifi_get_mode`, association from `esp_wifi_sta_get_ap_info`, and interface/IP from ESP-NETIF. `wifiConnected` is true only with a known enabled STA, confirmed association, an up network interface and a nonzero IPv4 address. This indicates LAN readiness, not Internet reachability. An old IP or Arduino cached status alone is insufficient.
+
+`wifiStatus` values: `connected`, `associated` (link exists but interface/address is not ready), `disconnected`, `disabled`, `unknown` (required SDK read failed). The original event-cached status remains available as `wifiArduinoStatus`, together with `wifiAssociated`, `wifiNetifUp`, `wifiHasAddress` and SDK result fields `wifiModeError`, `wifiAssociationError`, `wifiIpError`. HTTP `ip` is 0.0.0.0 unless the station is ready. The heartbeat uses `wifi=connected` etc. and labels the original number separately as `arduino_wifi=255`. AP `clients` counts devices on AviorSign's own AP and does not determine office connectivity.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.

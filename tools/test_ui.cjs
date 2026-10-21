@@ -88,6 +88,12 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  const wifiRequest=requests.findLast(r=>r.url.endsWith('/wifi'));
  assert.equal(JSON.parse(wifiRequest.opts.body).ssid,'Office-Test');
  assert.equal(d.getElementById('wifiPass').value,'','credential field cleared after submit');
+ device.wifiConnected=true;device.wifiArduinoStatus=255;device.wifiStatus='connected';device.ip='192.168.0.33';await w.refresh();
+ assert.equal(d.getElementById('connection').textContent,'В сети · 192.168.0.33','cached Arduino 255 must not override backend evidence');
+ device.wifiConnected=false;device.wifiStatus='associated';await w.refresh();
+ assert.match(d.getElementById('connection').textContent,/ожидается IP/);
+ device.wifiStatus='unknown';await w.refresh();
+ assert.match(d.getElementById('connection').textContent,/неизвестно/);
  await click('disconnect');assert.equal(w.sessionStorage.getItem('aviorKey'),null);
  assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload and stale-image guard: PASS');dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});
