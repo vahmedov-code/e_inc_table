@@ -41,6 +41,12 @@ uint8_t interruptedPhase=PHASE_IDLE;uint32_t renderAborts=0;
 std::atomic<uint32_t> workerStackFree(0);
 // Lets the panel finish its first refresh after AP/STA radio start-up, not during it.
 constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
+// Diagnostic: radio stays off while the panel refreshes, so a brownout can be
+// attributed to the panel alone or to the panel plus Wi-Fi. The grace period lets
+// the HTTP reply that requested the refresh leave before the radio stops.
+constexpr bool RADIO_OFF_DURING_REFRESH=true;
+constexpr uint32_t RADIO_OFF_GRACE_MS=1500;
+int pendingJob=-1;uint32_t pendingSince=0;bool radioPaused=false;
 uint32_t scanStarted=0;
 struct WifiSnapshot {
   WifiEvidence evidence{};
@@ -114,8 +120,12 @@ bool parseSchedule(const JsonDocument& d,Event* out,int& count,int& offset){
   }
   return !d["enabled"].as<bool>() || count>0;
 }
-#if !AVIOR_RECOVERY
 Preferences tracePrefs;
+void clearRenderBlock(){
+  if(RECOVERY_MODE||interruptedPhase==PHASE_IDLE)return;
+  interruptedPhase=PHASE_IDLE;tracePrefs.putUChar("blocked",PHASE_IDLE);
+}
+#if !AVIOR_RECOVERY
 void renderPhase(uint8_t p){
   tracePrefs.putUChar("phase",p);
   Serial.printf("[display] phase=%s t_ms=%lu heap=%u stack_free=%u\n",phaseName(p),(unsigned long)millis(),ESP.getFreeHeap(),(unsigned)uxTaskGetStackHighWaterMark(nullptr));
@@ -154,7 +164,20 @@ void requestDisplay(){
   if(!confirmed || rendering || !fsReady && desired==3 || desired==displayed)return;
   if(lastRefresh && millis()-lastRefresh<60000)return;
   if(millis()<AUTO_RENDER_DELAY_MS)return;
-  rendering=true;if(xQueueSend(jobs,&desired,0)!=pdTRUE)rendering=false;
+  rendering=true;pendingJob=desired;pendingSince=millis();
+}
+bool startRadio(){
+  WiFi.mode(RECOVERY_MODE?WIFI_AP:WIFI_AP_STA);WiFi.setHostname("avior");
+  bool apOK=WiFi.softAP(("AviorSign-"+String((uint32_t)ESP.getEfuseMac(),HEX)).c_str(),apPassword.c_str());
+  if(RECOVERY_MODE)WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  // Wi-Fi recovery deliberately waits for a panel request, even with saved credentials.
+  // This preserves an AP-only baseline until the owner starts the next test.
+  if(!RECOVERY_MODE&&ssid.length())WiFi.begin(ssid.c_str(),wifiPassword.c_str());
+  return apOK;
+}
+void resumeRadio(){
+  if(!radioPaused)return;
+  radioPaused=false;bool apOK=startRadio();Serial.printf("[radio] on access_point=%s\n",apOK?"ready":"failed");
 }
 void state(){
   WifiSnapshot wifi=wifiSnapshot();
@@ -195,7 +218,7 @@ void routes(){
     if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
     int s=statusIndex(d["status"].as<String>());if(s<0){error(400,"Неизвестный статус");return;}
     if(s==3&&(!fsReady||!LittleFS.exists(assetPath(3)))){error(409,"Сначала загрузите изображение");return;}
-    desired=s;automatic=false;source="manual";prefs.putInt("desired",s);saveSchedule();displayError="";requestDisplay();state();
+    desired=s;automatic=false;source="manual";prefs.putInt("desired",s);saveSchedule();displayError="";clearRenderBlock();requestDisplay();state();
   });
   web.on("/api/v1/schedule",HTTP_GET,[]{if(!auth())return;JsonDocument d;scheduleJson(d);reply(200,d);});
   web.on("/api/v1/schedule",HTTP_PUT,[]{
@@ -221,6 +244,7 @@ void routes(){
   });
   web.on("/api/v1/wifi",HTTP_PUT,[]{
     if(!auth()||!writable(true))return;JsonDocument d;if(!body(d))return;
+    if(rendering){error(409,"Дождитесь окончания обновления экрана");return;}
     if(scanActive&&WiFi.scanComplete()==WIFI_SCAN_RUNNING){error(409,"Дождитесь окончания поиска сетей");return;}
     if(!d["ssid"].is<const char*>()||!d["password"].is<const char*>()){error(400,"Требуются ssid и password");return;}
     String s=d["ssid"],p=d["password"];if(s.length()<1||s.length()>32||p.length()>63||(p.length()>0&&p.length()<8)){error(400,"Проверьте имя сети и пароль");return;}
@@ -228,6 +252,7 @@ void routes(){
   });
   web.on("/api/v1/wifi/scan",HTTP_POST,[]{
     if(!auth()||!writable(true))return;
+    if(rendering){error(409,"Дождитесь окончания обновления экрана");return;}
     if(scanActive&&WiFi.scanComplete()==WIFI_SCAN_RUNNING){JsonDocument d;d["scanning"]=true;reply(202,d);return;}
     WiFi.scanDelete();
     int n=WiFi.scanNetworks(true,false);
@@ -278,14 +303,20 @@ void setup(){
   {
     // Recovery only reads the trace, so the evidence survives until normal firmware returns.
     Preferences trace;trace.begin("avior-trace",RECOVERY_MODE);
-    interruptedPhase=trace.getUChar("phase",PHASE_IDLE);renderAborts=trace.getUInt("aborts",0);
+    uint8_t last=trace.getUChar("phase",PHASE_IDLE);if(last>=PHASE_COUNT)last=PHASE_START;
+    renderAborts=trace.getUInt("aborts",0);
+    // The block persists in NVS: the panel can keep refreshing by itself after the
+    // MCU reset and cause further resets, which must not re-enable automatic retry.
+    interruptedPhase=last!=PHASE_IDLE?last:trace.getUChar("blocked",PHASE_IDLE);
     if(interruptedPhase>=PHASE_COUNT)interruptedPhase=PHASE_START;
+    int abortReset=last!=PHASE_IDLE?(int)bootReason:trace.getInt("abortReset",0);
+    if(last!=PHASE_IDLE&&!RECOVERY_MODE){
+      trace.putUInt("aborts",++renderAborts);trace.putUChar("blocked",last);trace.putInt("abortReset",abortReset);trace.putUChar("phase",PHASE_IDLE);
+    }
     if(blocksAutoRender(interruptedPhase)){
-      Serial.printf("[boot] interrupted_render phase=%s reset=%s aborts=%u\n",phaseName(interruptedPhase),resetName(bootReason),(unsigned)renderAborts+1);
-      if(!RECOVERY_MODE){
-        trace.putUInt("aborts",++renderAborts);trace.putUChar("phase",PHASE_IDLE);
-        displayError=String("Прошлое обновление прервано сбросом: этап ")+phaseName(interruptedPhase)+", причина "+resetName(bootReason)+". Автоповтор отключён, запустите вручную.";
-      }
+      const char* why=resetName((esp_reset_reason_t)abortReset);
+      Serial.printf("[boot] render_blocked phase=%s reset_at_abort=%s aborts=%u new_abort=%d\n",phaseName(interruptedPhase),why,(unsigned)renderAborts,last!=PHASE_IDLE);
+      if(!RECOVERY_MODE)displayError=String("Прошлое обновление прервано сбросом: этап ")+phaseName(interruptedPhase)+", причина "+why+". Автоповтор отключён, запустите вручную.";
     }
     trace.end();
   }
@@ -303,14 +334,10 @@ void setup(){
 #endif
   }
   Serial.println("[boot] phase=wifi");Serial.flush();
-  WiFi.mode(RECOVERY_MODE?WIFI_AP:WIFI_AP_STA);WiFi.setHostname("avior");
-  bool apOK=WiFi.softAP(("AviorSign-"+String((uint32_t)ESP.getEfuseMac(),HEX)).c_str(),apPassword.c_str());
-  if(RECOVERY_MODE)WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  if(!RECOVERY_MODE){ssid=prefs.getString("ssid","");wifiPassword=prefs.getString("wifi","");}
+  bool apOK=startRadio();
   Serial.printf("[boot] access_point=%s\n",apOK?"ready":"failed");
-  // Wi-Fi recovery deliberately waits for a panel request, even with saved credentials.
-  // This preserves an AP-only baseline until the owner starts the next test.
   if(!RECOVERY_MODE){
-    ssid=prefs.getString("ssid","");wifiPassword=prefs.getString("wifi","");if(ssid.length())WiFi.begin(ssid.c_str(),wifiPassword.c_str());
     configTime(0,0,"pool.ntp.org","time.google.com");MDNS.begin("avior");MDNS.addService("http","tcp",80);
   }
   Serial.printf("\nAviorSign setup\nAP password: %s\nAPI token: %s\nOpen http://192.168.4.1\n",apPassword.c_str(),token.c_str());
@@ -319,11 +346,16 @@ void setup(){
 void loop(){
   web.handleClient();Result r;
   if(scanActive&&millis()-scanStarted>30000&&WiFi.scanComplete()!=WIFI_SCAN_RUNNING){WiFi.scanDelete();scanActive=false;}
-  if(results&&xQueueReceive(results,&r,0)==pdTRUE){rendering=false;lastRefresh=millis();if(r.ok){displayed=r.status;displayError="";}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
+  if(pendingJob>=0&&millis()-pendingSince>=RADIO_OFF_GRACE_MS){
+    int s=pendingJob;pendingJob=-1;
+    if(RADIO_OFF_DURING_REFRESH){Serial.println("[radio] off for refresh");WiFi.scanDelete();scanActive=false;WiFi.mode(WIFI_OFF);radioPaused=true;}
+    if(xQueueSend(jobs,&s,0)!=pdTRUE){rendering=false;resumeRadio();}
+  }
+  if(results&&xQueueReceive(results,&r,0)==pdTRUE){rendering=false;lastRefresh=millis();resumeRadio();if(r.ok){displayed=r.status;displayError="";clearRenderBlock();}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
   if(millis()-lastTick>1000){
     lastTick=millis();time_t now=time(nullptr);
     if(automatic&&now>1700000000){source="schedule";now+=utcOffset*60;tm t;gmtime_r(&now,&t);int s=scheduledStatus(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);if(s>=0&&desired!=s){desired=s;displayError="";}}
-    if(displayError.isEmpty())requestDisplay();
+    if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }
   if(millis()-lastHealth>=5000){
     lastHealth=millis();

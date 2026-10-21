@@ -1,5 +1,21 @@
 # Validation — 2026-10-21
 
+## Owner log on 0.1.4-diag and update 0.1.5-diag
+
+Facts from the owner's serial log (USB power, battery disconnected):
+
+- The refresh reached `refresh` at t=20.9 s (reset, power-on and frame transfer completed; frame transfer took about 0.57 s). About 7 s into `refresh` the CH340 port vanished and the next boot reported `reset=brownout(9)`.
+- Two further resets followed within about 15 s with no new render requested: another `brownout`, then `power_on` with the CH340 absent from Windows. A port watch earlier showed the same CH340 dropouts (about 0.8 s every 6-11 s) under 0.1.3.
+- In ROM download mode the port stayed up long enough to flash.
+- LittleFS mount fails with `Corrupted dir pair` (-84): the factory data partition is not a LittleFS image. Unrelated to the resets; storage stays disabled until the owner formats it explicitly.
+- The owner reports the same restarts earlier with the battery connected.
+
+Interpretation, not yet proven: the supply rail collapses during the panel refresh. The extra resets after the MCU reset fit a panel that keeps running its waveform after the MCU stops driving it. Whether Wi-Fi current contributes, and whether the init values draw abnormal booster current, is open.
+
+Defect in 0.1.4-diag: the block was cleared at the first boot after an abort, so a later reset re-enabled automatic retry. 0.1.5-diag keeps it in NVS (`blocked`, `abortReset`) until a manual status request or a successful refresh.
+
+Experiment in 0.1.5-diag: the radio is stopped (`WiFi.mode(WIFI_OFF)`) for the whole refresh and restarted afterwards, after a 1.5 s grace period for the HTTP reply. If brownouts stop, the combined panel and Wi-Fi load is the trigger; if they persist, the panel path alone collapses the supply. Wi-Fi setup and scan are refused while a refresh runs. Restart of mDNS after the radio returns is not verified.
+
 ## Display diagnostics 0.1.4-diag
 
 Code review found a reset loop independent of its root cause: `hardware=true` persists in NVS, while `displayed` and `lastRefresh` start empty, so every boot requests a full refresh about one second after start, concurrently with AP/STA start-up. Any reset during refresh therefore repeats on the next boot.
