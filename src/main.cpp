@@ -11,6 +11,7 @@
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
+#include "render_trace.h"
 #if !AVIOR_RECOVERY
 #include <U8g2_for_Adafruit_GFX.h>
 #include "panel.h"
@@ -36,6 +37,10 @@ File uploadFile;size_t uploadBytes=0;bool uploadOK=false;String uploadPath;
 uint32_t lastHealth=0;
 esp_reset_reason_t bootReason=ESP_RST_UNKNOWN;
 bool scanActive=false;
+uint8_t interruptedPhase=PHASE_IDLE;uint32_t renderAborts=0;
+std::atomic<uint32_t> workerStackFree(0);
+// Lets the panel finish its first refresh after AP/STA radio start-up, not during it.
+constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
 uint32_t scanStarted=0;
 struct WifiSnapshot {
   WifiEvidence evidence{};
@@ -110,8 +115,14 @@ bool parseSchedule(const JsonDocument& d,Event* out,int& count,int& offset){
   return !d["enabled"].as<bool>() || count>0;
 }
 #if !AVIOR_RECOVERY
+Preferences tracePrefs;
+void renderPhase(uint8_t p){
+  tracePrefs.putUChar("phase",p);
+  Serial.printf("[display] phase=%s t_ms=%lu heap=%u stack_free=%u\n",phaseName(p),(unsigned long)millis(),ESP.getFreeHeap(),(unsigned)uxTaskGetStackHighWaterMark(nullptr));
+}
 void worker(void*) {
   uint8_t* data=(uint8_t*)malloc(FRAME_BYTES);
+  workerStackFree=uxTaskGetStackHighWaterMark(nullptr);
   int s;
   for(;;){
     xQueueReceive(jobs,&s,portMAX_DELAY);bool ok=data!=nullptr;
@@ -127,8 +138,13 @@ void worker(void*) {
         font.setForegroundColor(0);font.setBackgroundColor(1);font.setCursor(11,66);font.print(names[s]);
         f.setTextSize(2);f.setCursor(44,410);f.print("avior.local");
       }
-      if(ok){Serial.printf("[display] start status=%s\n",keys[s]);Panel panel;ok=panel.show(data);Serial.printf("[display] complete ok=%d\n",ok);}
+      if(ok){
+        Serial.printf("[display] start status=%s\n",keys[s]);renderPhase(PHASE_START);
+        Panel panel;panel.phase=renderPhase;ok=panel.show(data);
+        renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d\n",ok);
+      }
     }
+    workerStackFree=uxTaskGetStackHighWaterMark(nullptr);
     Result r{s,ok};xQueueSend(results,&r,portMAX_DELAY);
   }
 }
@@ -137,6 +153,7 @@ void requestDisplay(){
   if(RECOVERY_MODE)return;
   if(!confirmed || rendering || !fsReady && desired==3 || desired==displayed)return;
   if(lastRefresh && millis()-lastRefresh<60000)return;
+  if(millis()<AUTO_RENDER_DELAY_MS)return;
   rendering=true;if(xQueueSend(jobs,&desired,0)!=pdTRUE)rendering=false;
 }
 void state(){
@@ -151,6 +168,8 @@ void state(){
   d["wifiModeError"]=wifi.modeError;d["wifiAssociationError"]=wifi.associationError;d["wifiIpError"]=wifi.ipError;
   d["timeValid"]=time(nullptr)>1700000000;
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
+  d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
+  d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
   d["cooldownSeconds"]=lastRefresh&&millis()-lastRefresh<60000?(60000-(millis()-lastRefresh))/1000:0;
   auto assets=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)assets[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));reply(200,d);
 }
@@ -256,6 +275,20 @@ void setup(){
   confirmed=!RECOVERY_MODE&&prefs.getBool("hardware",false);desired=constrain(prefs.getInt("desired",1),0,3);
   JsonDocument d;String stored=prefs.getString("schedule","");int n,offset;
   if(!deserializeJson(d,stored)&&parseSchedule(d,events,n,offset)){eventCount=n;utcOffset=offset;automatic=d["enabled"];}
+  {
+    // Recovery only reads the trace, so the evidence survives until normal firmware returns.
+    Preferences trace;trace.begin("avior-trace",RECOVERY_MODE);
+    interruptedPhase=trace.getUChar("phase",PHASE_IDLE);renderAborts=trace.getUInt("aborts",0);
+    if(interruptedPhase>=PHASE_COUNT)interruptedPhase=PHASE_START;
+    if(blocksAutoRender(interruptedPhase)){
+      Serial.printf("[boot] interrupted_render phase=%s reset=%s aborts=%u\n",phaseName(interruptedPhase),resetName(bootReason),(unsigned)renderAborts+1);
+      if(!RECOVERY_MODE){
+        trace.putUInt("aborts",++renderAborts);trace.putUChar("phase",PHASE_IDLE);
+        displayError=String("Прошлое обновление прервано сбросом: этап ")+phaseName(interruptedPhase)+", причина "+resetName(bootReason)+". Автоповтор отключён, запустите вручную.";
+      }
+    }
+    trace.end();
+  }
   if(RECOVERY_MODE){
     automatic=false;source=MODE_NAME;fsReady=false;
     Serial.println("[boot] recovery: display task, SPI, framebuffer and filesystem disabled");
@@ -264,6 +297,7 @@ void setup(){
   Serial.println("[boot] phase=filesystem");Serial.flush();
   fsReady=LittleFS.begin(false,"/littlefs",5,"littlefs"); // Never auto-format the factory filesystem.
 #if !AVIOR_RECOVERY
+  tracePrefs.begin("avior-trace",false);
   jobs=xQueueCreate(1,sizeof(int));results=xQueueCreate(1,sizeof(Result));
   if(!jobs||!results||xTaskCreatePinnedToCore(worker,"epaper",8192,nullptr,1,nullptr,1)!=pdPASS){Serial.println("Worker allocation failed");while(true)delay(1000);}
 #endif

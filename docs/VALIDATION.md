@@ -1,5 +1,18 @@
 # Validation — 2026-10-21
 
+## Display diagnostics 0.1.4-diag
+
+Code review found a reset loop independent of its root cause: `hardware=true` persists in NVS, while `displayed` and `lastRefresh` start empty, so every boot requests a full refresh about one second after start, concurrently with AP/STA start-up. Any reset during refresh therefore repeats on the next boot.
+
+- Each panel stage (`start`, `reset`, `power_on`, `frame`, `refresh`, `power_off`, `deep_sleep`) is written to NVS namespace `avior-trace` before it runs and cleared to `idle` afterwards. Serial prints time, heap and worker stack headroom per stage.
+- A nonzero stage at boot means the previous refresh was interrupted by a reset. Normal firmware then blocks automatic retry and reports the stage and reset reason in `displayError`; a manual status request from the panel clears it. The `hardware` key is untouched. Recovery builds only read the trace.
+- The first automatic refresh waits 20 s after boot so it no longer coincides with radio start-up. This separates two factors; it is not a fix.
+- `/api/v1/state` adds `interruptedPhase`, `renderAborts`, `minHeap`, `workerStackFree`.
+- `tools/serial_log.py` is a read-only log that keeps DTR/RTS released, survives USB re-enumeration and redacts boot secrets into `logs/` (ignored by Git).
+- Brownout detector and watchdogs are unchanged. Framework config: brownout level 0, task watchdog 5 s on IDLE0 only; the display worker runs on core 1 and yields, so the panel code path alone cannot starve the task watchdog. Panic, heap or supply faults are not excluded.
+
+Compiled for all three environments with Arduino-ESP32 2.0.17 and the pinned libraries. Not run on hardware. The F53 command sequence was not independently re-verified: the vendor archive is not public and the F52 driver was deliberately not used as a substitute.
+
 ## Recovery update 0.1.1
 
 A separate `esp32-m075-recovery` build excludes the display worker and panel driver at preprocessing, bypasses the filesystem mount and STA connection, and exposes reset diagnostics in state and in a five-second serial heartbeat. Panel tests include disabled mutation controls and the visible reset reason in recovery. Both environments must compile before publication. Hardware stability and the cause of the user's restarts remain unverified until the owner installs recovery and sends the log.

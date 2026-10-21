@@ -10,3 +10,4 @@ include/secrets.h
 private/
 __pycache__/
 tmp/
+logs/

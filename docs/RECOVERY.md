@@ -38,9 +38,19 @@ $backupHash = (Get-FileHash 'C:\AviorSign\gooddisplay_factory_backup.bin' -Algor
 
 ## Получить журнал
 
+Рекомендуется журнал только на чтение: не перезагружает плату при открытии порта, переподключается при пропадании COM-порта и скрывает пароль и токен. Файл сохраняется в `logs/` (исключён из Git):
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" tools/serial_log.py --port COM20
+```
+
+Альтернатива:
+
 ```powershell
 pio device monitor --port COM20 --baud 115200
 ```
+
+С версии 0.1.4-diag этап прерванного обновления экрана виден в `/api/v1/state` (`interruptedPhase`) и в строке `[boot] interrupted_render`, даже если сам сброс в журнал не попал.
 
 Даже если стартовый вывод был пропущен, каждые 5 секунд появляется строка:
 

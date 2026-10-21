@@ -2,6 +2,7 @@
 #include <Adafruit_GFX.h>
 #include <SPI.h>
 #include "board.h"
+#include "render_trace.h"
 
 // Native JD79665CA: 0 black, 1 white, 2 yellow, 3 red; MSB pixel first.
 class Frame : public Adafruit_GFX {
@@ -41,7 +42,9 @@ class Panel {
     }
     return true;
   }
+  void mark(uint8_t p){if(phase)phase(p);}
 public:
+  void (*phase)(uint8_t)=nullptr;
   // Protocol verified against Good Display A32-GDEM075F53-F-20260709.
   // Full refresh only. No F52 waveform or controller substitution.
   bool show(const uint8_t* data) {
@@ -50,6 +53,7 @@ public:
     digitalWrite(EPD_CS,HIGH);digitalWrite(EPD_RST,HIGH);
     SPI.begin(EPD_SCK,-1,EPD_MOSI,EPD_CS);
     SPI.beginTransaction(SPISettings(4000000,MSBFIRST,SPI_MODE0));
+    mark(PHASE_RESET);
     delay(100); digitalWrite(EPD_RST,LOW);delay(10);
     digitalWrite(EPD_RST,HIGH);delay(10);
     bool ok=ready();
@@ -57,15 +61,16 @@ public:
       reg(0x4D,{0x78}); reg(0x00,{0x2F,0x29});reg(0xE3,{0x88});
       reg(0x50,{0x37});reg(0x61,{0x03,0x20,0x01,0xE0});
       reg(0x65,{0,0,0,0});reg(0xE9,{1});reg(0xF0,{0x5F});
-      reg(0x30,{8});cmd(0x04);ok=ready();
+      reg(0x30,{8});mark(PHASE_POWER_ON);cmd(0x04);ok=ready();
     }
     if(ok) {
-      cmd(0x10);
+      mark(PHASE_FRAME);cmd(0x10);
       for(size_t i=0;i<FRAME_BYTES;i++) {byte(data[i],true);if((i&1023)==0)delay(1);}
-      reg(0x12,{0});ok=ready();
+      mark(PHASE_REFRESH);reg(0x12,{0});ok=ready();
     }
     // Always attempt power off and deep sleep, even following a timeout.
-    reg(0x02,{0}); bool poweredOff=ready();reg(0x07,{0xA5});
+    mark(PHASE_POWER_OFF);reg(0x02,{0}); bool poweredOff=ready();
+    mark(PHASE_SLEEP);reg(0x07,{0xA5});
     digitalWrite(EPD_CS,HIGH);SPI.endTransaction();
     return ok && poweredOff;
   }
