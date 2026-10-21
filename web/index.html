@@ -15,7 +15,7 @@
 <details><summary>Подключение к Wi-Fi</summary><div><form id="wifiForm" class="stack"><div class="form-grid"><label>Имя сети 2,4 ГГц<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><button class="primary">Подключить к сети</button><p class="caption">Точка доступа вывески остаётся доступной. Адрес в сети появится в статусе подключения.</p></form></div></details>
 <details><summary>Первый запуск: плата и хранилище</summary><div><p>Профиль: ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA.</p><p><code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><div class="notice">Первичная подготовка хранилища удаляет содержимое заводского файлового раздела 0x290000–0x3FFFFF. Это отдельное действие; для встроенных статусов оно не требуется.</div><label class="check"><input id="confirmStorage" type="checkbox"><span>Я сохранил бэкап и разрешаю форматировать только файловый раздел для макетов AviorSign.</span></label><button id="initStorage">Подготовить хранилище изображений</button></div></details>
 <details><summary>Интеграция с Avior CRM</summary><div><p>Локальный API версии 1 готов для внешнего адаптера CRM. Готового подключения к Avior CRM пока нет.</p><p><code>POST /api/v1/status {"status":"open"}</code></p><p class="caption">Каждый запрос API требует заголовок Authorization: Bearer с ключом устройства. Подробности — в docs/API.md. Не открывайте HTTP-панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></div></details></section>
-</main><footer><span>AviorSign · 0.1.0</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
+</main><footer><span>AviorSign · 0.1.1</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
 <script>
 'use strict';
 const $=id=>document.getElementById(id),labels={open:'Открыто',closed:'Закрыто',soon:'Скоро буду',image:'Изображение',unknown:'неизвестно'};
@@ -51,9 +51,11 @@ async function refresh(){
  state=await(await api('state')).json();$('login').hidden=true;
  $('connection').textContent=state.wifiConnected?'В сети · '+state.ip:'Точка доступа · '+state.apIP;
  $('actual').textContent='На экране: '+(labels[state.displayed]||'неизвестно');
- $('deviceState').textContent=!state.hardwareConfirmed?'Первый запуск: подтвердите плату и матрицу в настройках.':state.displayError|| (state.busy?'Экран обновляется…':state.cooldownSeconds?'Следующее обновление через '+state.cooldownSeconds+' с':state.desired!==state.displayed?'Ожидает обновления':'Экран обновлён');
+ $('deviceState').textContent=state.recovery?'Диагностический режим: дисплей отключён. Причина последнего сброса: '+state.resetReason:!state.hardwareConfirmed?'Первый запуск: подтвердите плату и матрицу в настройках.':state.displayError|| (state.busy?'Экран обновляется…':state.cooldownSeconds?'Следующее обновление через '+state.cooldownSeconds+' с':state.desired!==state.displayed?'Ожидает обновления':'Экран обновлён');
  $('clockState').textContent=(state.automatic?'Расписание включено. ':'Расписание выключено. ')+(state.timeValid?'Время устройства: '+new Date(state.unixTime*1000).toLocaleString('ru-RU',{timeZone:'UTC'})+' UTC':'Время ещё не установлено. Синхронизируйте его с телефона.');
- $('initStorage').disabled=state.storageReady||state.busy;
+ ['publish','saveTemplate','uploadImage','saveSchedule','pauseSchedule','syncClock','enableHardware'].forEach(id=>$(id).disabled=!!state.recovery);
+ $('wifiForm').querySelector('button').disabled=!!state.recovery;
+ $('initStorage').disabled=!!state.recovery||state.storageReady||state.busy;
 }
 const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 function eventRow(e={day:1,minute:540,status:'open'}){

@@ -15,6 +15,7 @@ jobs:
           node-version: '22'
       - run: pip install platformio==6.1.18
       - run: python -m platformio run
+      - run: python -m platformio run -e esp32-m075-recovery
       - run: python tools/check_project.py
       - run: npm install --prefix .pio/ui-tests --no-audit --no-fund jsdom@26.1.0 @napi-rs/canvas@0.1.80
       - run: node tools/test_ui.cjs

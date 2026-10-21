@@ -1,5 +1,9 @@
 # Validation — 2026-10-21
 
+## Recovery update 0.1.1
+
+A separate `esp32-m075-recovery` build excludes the display worker and panel driver at preprocessing, bypasses the filesystem mount and STA connection, and exposes reset diagnostics in state and in a five-second serial heartbeat. Panel tests include disabled mutation controls and the visible reset reason in recovery. Both environments must compile before publication. Hardware stability and the cause of the user's restarts remain unverified until the owner installs recovery and sends the log.
+
 ## Completed locally
 
 - PlatformIO release build for ESP32-D0WD / 4 MB Flash, espressif32 6.10.0, Arduino-ESP32 2.0.17. No serial port was opened, firmware uploaded, Flash erased, filesystem formatted, or eFuse changed.

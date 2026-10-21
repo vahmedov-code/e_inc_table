@@ -4,6 +4,8 @@ Base URL: `http://DEVICE_IP/api/v1`. All endpoints, including reads, require `Au
 
 JSON errors have shape `{"error":"message"}`. Typical codes: 400 invalid input, 401 bad/missing token, 404 missing asset/route, 409 precondition, 500 storage error. JSON bodies are limited to 8192 bytes by the application handler. The synchronous HTTP server is intended for trusted LAN clients, not hostile internet traffic.
 
+Version 0.1.1 adds `recovery`, `resetReason` and `resetReasonCode` to state. The dedicated recovery build starts AP only, excludes the display task and filesystem mount, and returns HTTP 423 for every mutating endpoint. It does not erase or reset saved settings. See [RECOVERY.md](RECOVERY.md).
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.
