@@ -12,6 +12,8 @@ Version 0.1.3 changes connectivity reporting to a sampled SDK snapshot: operatin
 
 `wifiStatus` values: `connected`, `associated` (link exists but interface/address is not ready), `disconnected`, `disabled`, `unknown` (required SDK read failed). The original event-cached status remains available as `wifiArduinoStatus`, together with `wifiAssociated`, `wifiNetifUp`, `wifiHasAddress` and SDK result fields `wifiModeError`, `wifiAssociationError`, `wifiIpError`. HTTP `ip` is 0.0.0.0 unless the station is ready. The heartbeat uses `wifi=connected` etc. and labels the original number separately as `arduino_wifi=255`. AP `clients` counts devices on AviorSign's own AP and does not determine office connectivity.
 
+Version 0.2.0 stops the radio (AP and STA) for the duration of each panel refresh, about 25 s including the 1.5 s grace period after the request; HTTP is unreachable during that time and `busy` is true before and after. Wi-Fi setup and scan return 409 while a refresh runs. State adds `interruptedPhase`, `renderAborts`, `minHeap`, `workerStackFree`. After a reset during a refresh, automatic refresh stays blocked (reported in `displayError`) until a manual `POST /status` or a successful refresh.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.
@@ -56,6 +58,8 @@ Refreshes are separated by at least 60 seconds after completion. New desired sta
 `POST /assets?slot=open` with multipart form field `file`. Slots: `open`, `closed`, `soon`, `image`. Raw payload must be exactly **96000 bytes**, 800×480, row major, four pixels per byte, most significant pixel first. Native palette: 0 black, 1 white, 2 yellow, 3 red. Do not upload PNG/JPEG directly: use browser conversion or implement the same format in an adapter.
 
 The file streams to `/upload.tmp` and is renamed into place after complete length validation. Failed/truncated/oversized uploads do not replace the existing slot. Upload start is rejected while a refresh is active. Storage must be initialized first. A current-status asset replacement invalidates the displayed cache and queues refresh; a different slot is stored for later. Slots do not change the status automatically. The client should send one file per request.
+
+`DELETE /asset?slot=soon` removes a saved picture so the status returns to its built-in frame. Rejected with 409 while a refresh runs, and for `image` while `image` is the desired status. Deleting the current status's picture queues a refresh.
 
 `GET /asset?slot=closed` returns the packed frame with `application/octet-stream`. Missing asset returns 404. Firmware-generated built-in status templates are not stored assets and cannot be downloaded through this endpoint.
 

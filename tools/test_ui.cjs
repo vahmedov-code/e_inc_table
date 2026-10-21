@@ -8,7 +8,7 @@ const deps=createRequire(resolve(__dirname,'../.pio/ui-tests/package.json'));
 const {JSDOM,VirtualConsole}=deps('jsdom');
 const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
-const device={desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
+const device={version:'0.2.0',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
 let scanMode='ok',scanPolls=0;
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
@@ -28,6 +28,7 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
        const scanning=scanMode==='ok'&&scanPolls++===0;
        return {ok:true,status:scanning?202:200,json:async()=>({scanning,networks:scanMode==='empty'?[]:[{ssid:'Office-Test',rssi:-42,secure:true},{ssid:'<img src=x onerror=alert(1)>',rssi:-60,secure:false}]})};
      }
+     if(url.includes('/asset?slot=')&&opts.method==='GET')return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0xff).buffer};
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
      if(url.endsWith('/schedule')&&opts.method==='PUT'){schedule=data;device.automatic=data.enabled;}
      const value=url.endsWith('/schedule')?schedule:device;
@@ -55,12 +56,33 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
    w.eval(`ctx.fillStyle='${css}';ctx.fillRect(0,0,800,480);`);const b=w.pack();assert.equal(b.length,96000);assert(b.every(x=>x===byte),`palette ${css}`);
    w.unpack(b);assert.equal(w.pack()[0],byte,'round trip palette');
  }
- await click('saveTemplate');const upload=requests.findLast(r=>r.url.includes('/assets?slot=open'));
- assert(upload);assert.equal((await upload.opts.body.get('file').arrayBuffer()).byteLength,96000);
- const fileInput=d.getElementById('imageFile');Object.defineProperty(fileInput,'files',{configurable:true,value:[{type:'image/png',size:256}]});fileInput.dispatchEvent(new w.Event('change'));await tick();
- assert.equal(d.querySelector('[data-status="image"]').getAttribute('aria-pressed'),'true');
- await click('uploadImage');assert(requests.some(r=>r.url.endsWith('/assets?slot=image')));
- d.querySelector('[data-status="closed"]').click();d.querySelector('[data-status="image"]').click();const uploads=requests.filter(r=>r.url.includes('/assets')).length;await click('uploadImage');assert.equal(requests.filter(r=>r.url.includes('/assets')).length,uploads,'stale image cannot be uploaded after template reset');
+ for(const [css,byte]of [['#8a8a8a',0x55],['#707070',0]]){w.eval(`ctx.fillStyle='${css}';ctx.fillRect(0,0,800,480);`);assert.equal(w.pack()[0],byte,`gray ${css} never becomes red`);}
+ assert.equal(d.getElementById('version').textContent,'AviorSign · 0.2.0');
+ assert.match(d.getElementById('clockState').textContent,/МСК/,'clock shown in schedule time zone, not UTC');
+ assert.match(d.getElementById('clockState').textContent,/16:00/,'1792587600 is 16:00 Moscow time');
+ assert.match(d.getElementById('clockState').textContent,/расходится/,'drift against this device is reported');
+ assert.equal(d.getElementById('saveImage').disabled,true,'nothing to save before a new picture');
+ await click('makeTemplate');assert.equal(d.getElementById('saveImage').disabled,false);
+ await click('saveImage');const upload=requests.findLast(r=>r.url.includes('/assets?slot=open'));
+ assert(upload,'template saved for the selected status');assert.equal((await upload.opts.body.get('file').arrayBuffer()).byteLength,96000);
+ assert.equal(d.querySelector('[data-kind="open"]').textContent,'своя картинка');
+ const fileInput=d.getElementById('imageFile');Object.defineProperty(fileInput,'files',{configurable:true,value:[{type:'image/png',size:256}]});
+ d.querySelector('[data-status="soon"]').click();fileInput.dispatchEvent(new w.Event('change'));await tick();
+ assert.match(d.getElementById('previewSource').textContent,/не сохранена/);
+ await click('saveImage');assert(requests.some(r=>r.url.endsWith('/assets?slot=soon')),'picture replaced for a built-in status');
+ d.querySelector('[data-status="closed"]').click();fileInput.dispatchEvent(new w.Event('change'));await tick();
+ d.querySelector('[data-status="image"]').click();const uploads=requests.filter(r=>r.url.includes('/assets')).length;await click('saveImage');assert.equal(requests.filter(r=>r.url.includes('/assets')).length,uploads,'unsaved picture is dropped when switching status');
+ d.querySelector('[data-status="soon"]').click();await click('resetImage');
+ assert(requests.some(r=>r.url.endsWith('/asset?slot=soon')&&r.opts.method==='DELETE'),'reset deletes the saved picture');
+ assert.equal(d.querySelector('[data-kind="soon"]').textContent,'стандартная');
+ device.storageReady=false;await w.refresh();assert.equal(d.getElementById('storageNotice').hidden,false);
+ await click('makeTemplate');const before=requests.filter(r=>r.url.includes('/assets')).length;await click('saveImage');
+ assert.equal(requests.filter(r=>r.url.includes('/assets')).length,before,'no upload without storage');assert.match(d.getElementById('feedback').textContent,/хранилище/);
+ device.storageReady=true;device.assets={closed:true};await w.refresh();await tick();
+ assert.equal(d.querySelector('[data-kind="closed"]').textContent,'своя картинка','saved pictures are loaded as thumbnails');
+ device.busy=true;device.hardwareConfirmed=true;await w.refresh();
+ assert.match(d.getElementById('deviceState').textContent,/Wi‑Fi временно выключен/);assert.equal(d.getElementById('publish').disabled,true);
+ device.busy=false;await w.refresh();
  device.recovery=true;device.resetReason='brownout';await w.refresh();
  assert.equal(d.getElementById('publish').disabled,true);
  assert.equal(d.getElementById('enableHardware').disabled,true);

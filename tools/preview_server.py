@@ -5,11 +5,12 @@ import json
 import time
 
 root=Path(__file__).resolve().parents[1]
-state={'version':'0.1.3','desired':'closed','displayed':'closed','busy':False,
+state={'version':'0.2.0','desired':'closed','displayed':'closed','busy':False,
        'displayError':'','hardwareConfirmed':False,'storageReady':False,
        'automatic':False,'source':'manual','ip':'192.168.1.42','apIP':'192.168.4.1',
        'wifiConnected':True,'timeValid':True,'cooldownSeconds':0,'assets':{}}
 schedule={'enabled':False,'utcOffsetMinutes':180,'events':[]}
+frames={}
 
 class Handler(BaseHTTPRequestHandler):
     def send(self,code,obj):
@@ -24,8 +25,25 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Authorization')!='Bearer preview':self.send(401,{'error':'Введите тестовый ключ preview'});return
         if self.path=='/api/v1/state':self.send(200,{**state,'unixTime':int(time.time())})
         elif self.path=='/api/v1/schedule':self.send(200,schedule)
+        elif self.path.startswith('/api/v1/asset?slot=') and self.path.split('=')[1] in frames:
+            b=frames[self.path.split('=')[1]];self.send_response(200)
+            self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(b)))
+            self.end_headers();self.wfile.write(b)
         else:self.send(404,{'error':'Нет сохранённого изображения в симуляторе'})
-    def do_POST(self): self.mutate()
+    def do_POST(self):
+        if self.path.startswith('/api/v1/assets?slot='):self.store();return
+        self.mutate()
+    def do_DELETE(self):
+        if self.headers.get('Authorization')!='Bearer preview':self.send(401,{'error':'Нужен тестовый ключ preview'});return
+        slot=self.path.split('=')[-1];frames.pop(slot,None);state['assets'][slot]=False;self.send(200,state)
+    def store(self):
+        if self.headers.get('Authorization')!='Bearer preview':self.send(401,{'error':'Нужен тестовый ключ preview'});return
+        if not state['storageReady']:self.send(400,{'error':'Хранилище не подготовлено'});return
+        b=self.rfile.read(int(self.headers.get('Content-Length',0)))
+        boundary=self.headers.get('Content-Type','').split('boundary=')[-1].encode()
+        part=b.split(b'--'+boundary)[1];frame=part.split(b'\r\n\r\n',1)[1][:-2]
+        if len(frame)!=96000:self.send(400,{'error':'Нужен файл ровно 96000 байт'});return
+        slot=self.path.split('=')[-1];frames[slot]=frame;state['assets'][slot]=True;self.send(200,state)
     def do_PUT(self): self.mutate()
     def mutate(self):
         if self.headers.get('Authorization')!='Bearer preview':self.send(401,{'error':'Нужен тестовый ключ preview'});return

@@ -41,9 +41,9 @@ uint8_t interruptedPhase=PHASE_IDLE;uint32_t renderAborts=0;
 std::atomic<uint32_t> workerStackFree(0);
 // Lets the panel finish its first refresh after AP/STA radio start-up, not during it.
 constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
-// Diagnostic: radio stays off while the panel refreshes, so a brownout can be
-// attributed to the panel alone or to the panel plus Wi-Fi. The grace period lets
-// the HTTP reply that requested the refresh leave before the radio stops.
+// The panel refresh together with the AP+STA radio browns out the board's supply
+// (owner logs 0.1.4/0.1.5), so the radio stays off while the panel refreshes. The
+// grace period lets the HTTP reply that requested the refresh leave first.
 constexpr bool RADIO_OFF_DURING_REFRESH=true;
 constexpr uint32_t RADIO_OFF_GRACE_MS=1500;
 int pendingJob=-1;uint32_t pendingSince=0;bool radioPaused=false;
@@ -283,6 +283,14 @@ void routes(){
     if(!LittleFS.rename("/upload.tmp",uploadPath)){error(500,"Не удалось сохранить изображение");return;}
     if(statusIndex(web.arg("slot"))==desired)displayed=-1;uploadOK=false;requestDisplay();state();
   },upload);
+  web.on("/api/v1/asset",HTTP_DELETE,[]{
+    if(!auth()||!writable())return;int s=statusIndex(web.arg("slot"));
+    if(!fsReady||s<0){error(404,"Нет изображения");return;}
+    if(rendering){error(409,"Дождитесь окончания обновления экрана");return;}
+    if(s==3&&desired==3){error(409,"Сначала выберите другой статус");return;}
+    if(LittleFS.exists(assetPath(s))&&!LittleFS.remove(assetPath(s))){error(500,"Не удалось удалить изображение");return;}
+    if(s==desired)displayed=-1;requestDisplay();state();
+  });
   web.on("/api/v1/asset",HTTP_GET,[]{
     if(!auth())return;int s=statusIndex(web.arg("slot"));if(!fsReady||s<0){error(404,"Нет изображения");return;}
     File f=LittleFS.open(assetPath(s),"r");if(!f){error(404,"Нет изображения");return;}

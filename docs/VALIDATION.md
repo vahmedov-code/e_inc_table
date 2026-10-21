@@ -1,5 +1,18 @@
 # Validation — 2026-10-21
 
+## Panel redesign 0.2.0
+
+The owner asked for a panel where results are visible without scrolling back up, and for replaceable pictures on every status.
+
+- Device state and connection sit in a sticky top bar (static on narrow screens); action results appear as a fixed toast, so no action requires scrolling to read its outcome. On desktop the preview card is sticky.
+- Each status tile shows a thumbnail of what that status displays: the saved picture downloaded from the device, or an approximation of the built-in frame. Selecting a status shows it large; the same block replaces it with a PNG/JPEG or a text layout, saves it, or deletes it (`DELETE /asset`, new) to return to the built-in frame. Saving or publishing an unsaved picture uploads it first; switching status drops it.
+- Storage preparation is offered inline where it is needed. The factory partition is erased, so formatting loses nothing on this board.
+- The clock is shown in the schedule time zone (it was shown in UTC, which read three hours behind Moscow) and warns when it differs from the browser by more than 2 minutes.
+- Quantisation maps near-gray pixels to black or white only; plain nearest colour turned antialiased text edges red.
+- Radio-off during refresh is now standard behaviour (version 0.2.0).
+
+Checked: node UI test (jsdom with real canvas) including per-status save, unsaved-picture drop, delete, missing storage, thumbnails from device, busy state, Moscow clock and gray quantisation; offline/syntax check; all three firmware environments compile with Arduino-ESP32 2.0.17. Desktop (1440×900) and phone (390 px) layouts were reviewed in headless Chromium against the simulator. Not yet run on the board.
+
 ## Owner log on 0.1.5-diag
 
 With the radio stopped for the refresh, the first automatic refresh completed on USB power: `refresh` from t=22.5 s to `power_off` at t=42.8 s (about 20 s), `complete ok=1`, no reset, radio back with the office IP. One run only; repeat refreshes are pending.
