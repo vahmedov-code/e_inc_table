@@ -4,6 +4,12 @@
 
 A separate `esp32-m075-recovery` build excludes the display worker and panel driver at preprocessing, bypasses the filesystem mount and STA connection, and exposes reset diagnostics in state and in a five-second serial heartbeat. Panel tests include disabled mutation controls and the visible reset reason in recovery. Both environments must compile before publication. Hardware stability and the cause of the user's restarts remain unverified until the owner installs recovery and sends the log.
 
+## Wi-Fi isolation update 0.1.2
+
+The owner reported a working recovery web panel and increasing uptime while powered by USB with the battery disconnected. This is a changed power condition as well as a changed firmware condition, so the earlier failure cannot yet be attributed to a specific component.
+
+Added a distinct `esp32-m075-recovery-wifi` environment. It retains the display/FS exclusions, starts in AP-only mode and permits Wi-Fi setup/scan to enable STA on demand. Compile-time checks exercise the actual mutation policy for normal, AP-only recovery and Wi-Fi recovery builds. UI tests verify that Wi-Fi controls alone are enabled, display/format controls stay disabled, the password field is cleared after submission, async scan polling fills the selector, selected SSID fills the form, SSIDs are rendered as text, empty scan preserves manual entry and scan errors permit retry. Build all three environments before publication; then test actual office Wi-Fi and radio scanning on the owner's board under unchanged USB-only power.
+
 ## Completed locally
 
 - PlatformIO release build for ESP32-D0WD / 4 MB Flash, espressif32 6.10.0, Arduino-ESP32 2.0.17. No serial port was opened, firmware uploaded, Flash erased, filesystem formatted, or eFuse changed.

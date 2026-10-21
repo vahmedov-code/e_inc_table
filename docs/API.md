@@ -6,6 +6,8 @@ JSON errors have shape `{"error":"message"}`. Typical codes: 400 invalid input, 
 
 Version 0.1.1 adds `recovery`, `resetReason` and `resetReasonCode` to state. The dedicated recovery build starts AP only, excludes the display task and filesystem mount, and returns HTTP 423 for every mutating endpoint. It does not erase or reset saved settings. See [RECOVERY.md](RECOVERY.md).
 
+Version 0.1.2 adds `mode` and `wifiSetupAllowed`. The new `recovery-wifi` profile permits only authenticated Wi-Fi setup and scan operations for the next isolation test; every other mutation remains HTTP 423. It starts AP only: a scan enables STA for discovery without connecting, and `PUT /wifi` enables STA and initiates connection. Saved credentials do not trigger a connection on boot in this profile.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.
@@ -54,6 +56,14 @@ The file streams to `/upload.tmp` and is renamed into place after complete lengt
 `GET /asset?slot=closed` returns the packed frame with `application/octet-stream`. Missing asset returns 404. Firmware-generated built-in status templates are not stored assets and cannot be downloaded through this endpoint.
 
 ## Setup
+
+`POST /wifi/scan` starts an asynchronous visible-network scan; returns HTTP 202 and `{"scanning":true}`. Poll `GET /wifi/scan` approximately once a second. While running it returns HTTP 202; on completion HTTP 200:
+
+```json
+{"scanning":false,"networks":[{"ssid":"Office-Test","rssi":-42,"secure":true}]}
+```
+
+The response contains up to 20 nonempty distinct SSIDs with RSSI and a password/security indicator. Hidden SSIDs are omitted; manual SSID entry is retained. Results are consumed on retrieval and released from RAM; uncollected completed results expire after 30 seconds. GET without an outstanding scan returns 409. Scan failure returns 503. A connection request while a scan is running returns 409. Both scan endpoints require the same Bearer token and Wi-Fi capability as credential setup, and return 423 in AP-only recovery. Scanning enables the station radio while preserving the AP; no NVS credential write or connection is initiated by scanning alone.
 
 `PUT /wifi {"ssid":"YOUR_NETWORK","password":"YOUR_PASSWORD"}` saves station credentials and initiates connection. SSID 1–32 bytes; password empty for an open network or 8–63 bytes. HTTP 202 only means accepted. Poll state for connection. AP remains enabled. Credentials are not returned by API.
 

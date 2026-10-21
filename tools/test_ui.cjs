@@ -10,6 +10,7 @@ const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
 const device={desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
+let scanMode='ok',scanPolls=0;
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
 const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),{
  url:'http://avior.test/',runScripts:'dangerously',virtualConsole:vc,
@@ -21,6 +22,12 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
      requests.push({url,opts});
      if(opts.headers.Authorization!=='Bearer preview')return {ok:false,status:401,json:async()=>({error:'Неверный ключ'})};
      let data=opts.body&&typeof opts.body==='string'?JSON.parse(opts.body):null;
+     if(url.endsWith('/wifi/scan')){
+       if(opts.method==='POST'){scanPolls=0;return {ok:true,status:202,json:async()=>({scanning:true})};}
+       if(scanMode==='error')return {ok:false,status:503,json:async()=>({error:'Поиск временно недоступен'})};
+       const scanning=scanMode==='ok'&&scanPolls++===0;
+       return {ok:true,status:scanning?202:200,json:async()=>({scanning,networks:scanMode==='empty'?[]:[{ssid:'Office-Test',rssi:-42,secure:true},{ssid:'<img src=x onerror=alert(1)>',rssi:-60,secure:false}]})};
+     }
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
      if(url.endsWith('/schedule')&&opts.method==='PUT'){schedule=data;device.automatic=data.enabled;}
      const value=url.endsWith('/schedule')?schedule:device;
@@ -31,6 +38,7 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
 const w=dom.window,d=w.document;
 const tick=()=>new Promise(r=>setTimeout(r,20));
 const click=async(id)=>{d.getElementById(id).click();await tick();};
+const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now()-start>3500)throw Error('Timed out waiting for UI action');await tick();}};
 (async()=>{
  assert.equal(requests.length,0,'no unauthenticated polling');
  d.getElementById('token').value='wrong';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
@@ -57,8 +65,29 @@ const click=async(id)=>{d.getElementById(id).click();await tick();};
  assert.equal(d.getElementById('publish').disabled,true);
  assert.equal(d.getElementById('enableHardware').disabled,true);
  assert.equal(d.getElementById('initStorage').disabled,true);
- assert.equal(d.getElementById('wifiForm').querySelector('button').disabled,true);
+ assert.equal(d.getElementById('wifiConnect').disabled,true);
+ assert.equal(d.getElementById('scanWifi').disabled,true);
  assert.match(d.getElementById('deviceState').textContent,/brownout/);
+ device.wifiSetupAllowed=true;await w.refresh();
+ assert.equal(d.getElementById('wifiConnect').disabled,false);
+ assert.equal(d.getElementById('scanWifi').disabled,false);
+ assert.equal(d.getElementById('enableHardware').disabled,true);
+ assert.equal(d.getElementById('initStorage').disabled,true);
+ await click('scanWifi');assert.equal(d.getElementById('scanWifi').disabled,true);
+ await waitFor(()=>d.getElementById('wifiScanStatus').textContent.includes('Найдено сетей: 2'));
+ assert.equal(d.getElementById('wifiNetworks').options.length,3);
+ assert.equal(d.getElementById('wifiNetworks').querySelector('img'),null,'SSID rendered as text, never HTML');
+ d.getElementById('wifiNetworks').value='Office-Test';d.getElementById('wifiNetworks').dispatchEvent(new w.Event('change'));
+ assert.equal(d.getElementById('ssid').value,'Office-Test','selected SSID fills connection form');
+ scanMode='empty';await click('scanWifi');assert.match(d.getElementById('wifiScanStatus').textContent,/Сети не найдены/);
+ assert.equal(d.getElementById('ssid').value,'Office-Test','empty scan preserves manual SSID');
+ scanMode='error';await click('scanWifi');assert.match(d.getElementById('feedback').textContent,/Поиск временно недоступен/);
+ assert.equal(d.getElementById('scanWifi').disabled,false,'scan can be retried after failure');
+ d.getElementById('wifiPass').value='example-password';
+ d.getElementById('wifiForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+ const wifiRequest=requests.findLast(r=>r.url.endsWith('/wifi'));
+ assert.equal(JSON.parse(wifiRequest.opts.body).ssid,'Office-Test');
+ assert.equal(d.getElementById('wifiPass').value,'','credential field cleared after submit');
  await click('disconnect');assert.equal(w.sessionStorage.getItem('aviorKey'),null);
  assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload and stale-image guard: PASS');dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});

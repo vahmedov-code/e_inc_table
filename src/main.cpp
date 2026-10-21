@@ -32,6 +32,8 @@ struct Result {int status;bool ok;};
 File uploadFile;size_t uploadBytes=0;bool uploadOK=false;String uploadPath;
 uint32_t lastHealth=0;
 esp_reset_reason_t bootReason=ESP_RST_UNKNOWN;
+bool scanActive=false;
+uint32_t scanStarted=0;
 const char* resetName(esp_reset_reason_t r){
   switch(r){
     case ESP_RST_POWERON:return "power_on";
@@ -53,7 +55,7 @@ int statusIndex(const String& value){for(int i=0;i<4;i++)if(value==keys[i])retur
 String assetPath(int s){return String("/")+keys[s]+".frame";}
 void reply(int code,const JsonDocument& d){String s;serializeJson(d,s);web.sendHeader("Cache-Control","no-store");web.send(code,"application/json",s);}
 void error(int code,const char* msg){JsonDocument d;d["error"]=msg;reply(code,d);}
-bool writable(){if(!RECOVERY_MODE)return true;error(423,"Диагностический режим: изменения отключены");return false;}
+bool writable(bool wifi=false){if(canMutate(wifi))return true;error(423,"Диагностический режим: это действие отключено");return false;}
 bool authorized(){return web.header("Authorization")=="Bearer "+token;}
 bool auth(){if(authorized())return true;error(401,"Требуется ключ доступа из Serial Monitor");return false;}
 bool body(JsonDocument& d){
@@ -110,7 +112,7 @@ void requestDisplay(){
   rendering=true;if(xQueueSend(jobs,&desired,0)!=pdTRUE)rendering=false;
 }
 void state(){
-  JsonDocument d;d["version"]=FW_VERSION;d["recovery"]=RECOVERY_MODE;d["resetReason"]=resetName(bootReason);d["resetReasonCode"]=(int)bootReason;d["board"]="ESP32-M075 V3.0";d["panel"]="GDEM075F53 / JD79665CA";
+  JsonDocument d;d["version"]=FW_VERSION;d["recovery"]=RECOVERY_MODE;d["mode"]=MODE_NAME;d["wifiSetupAllowed"]=canMutate(true);d["resetReason"]=resetName(bootReason);d["resetReasonCode"]=(int)bootReason;d["board"]="ESP32-M075 V3.0";d["panel"]="GDEM075F53 / JD79665CA";
   d["desired"]=keys[desired];d["displayed"]=displayed<0?"unknown":keys[displayed];d["busy"]=rendering.load();
   d["displayError"]=displayError;d["hardwareConfirmed"]=confirmed;d["storageReady"]=fsReady;
   d["automatic"]=automatic;d["source"]=source;d["ip"]=WiFi.localIP().toString();d["apIP"]=WiFi.softAPIP().toString();
@@ -166,10 +168,37 @@ void routes(){
     fsReady=LittleFS.format()&&LittleFS.begin(false,"/littlefs",5,"littlefs");if(!fsReady){error(500,"Не удалось подготовить хранилище");return;}state();
   });
   web.on("/api/v1/wifi",HTTP_PUT,[]{
-    if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
+    if(!auth()||!writable(true))return;JsonDocument d;if(!body(d))return;
+    if(scanActive&&WiFi.scanComplete()==WIFI_SCAN_RUNNING){error(409,"Дождитесь окончания поиска сетей");return;}
     if(!d["ssid"].is<const char*>()||!d["password"].is<const char*>()){error(400,"Требуются ssid и password");return;}
     String s=d["ssid"],p=d["password"];if(s.length()<1||s.length()>32||p.length()>63||(p.length()>0&&p.length()<8)){error(400,"Проверьте имя сети и пароль");return;}
     ssid=s;wifiPassword=p;prefs.putString("ssid",s);prefs.putString("wifi",p);web.send(202,"application/json","{\"accepted\":true}");WiFi.begin(s.c_str(),p.c_str());
+  });
+  web.on("/api/v1/wifi/scan",HTTP_POST,[]{
+    if(!auth()||!writable(true))return;
+    if(scanActive&&WiFi.scanComplete()==WIFI_SCAN_RUNNING){JsonDocument d;d["scanning"]=true;reply(202,d);return;}
+    WiFi.scanDelete();
+    int n=WiFi.scanNetworks(true,false);
+    if(n==WIFI_SCAN_FAILED){scanActive=false;error(503,"Не удалось начать поиск. Повторите через несколько секунд");return;}
+    scanActive=true;scanStarted=millis();JsonDocument d;d["scanning"]=n==WIFI_SCAN_RUNNING;reply(202,d);
+  });
+  web.on("/api/v1/wifi/scan",HTTP_GET,[]{
+    if(!auth())return;
+    if(!canMutate(true)){error(423,"Поиск сетей недоступен в AP-only recovery");return;}
+    if(!scanActive){error(409,"Сначала запустите поиск сетей");return;}
+    int n=WiFi.scanComplete();JsonDocument d;d["scanning"]=n==WIFI_SCAN_RUNNING;
+    if(n==WIFI_SCAN_RUNNING){reply(202,d);return;}
+    if(n==WIFI_SCAN_FAILED){scanActive=false;WiFi.scanDelete();error(503,"Поиск сетей не завершился. Повторите попытку");return;}
+    JsonArray networks=d["networks"].to<JsonArray>();String seen[20];int count=0;
+    // WiFi.SSID takes uint8_t indices in the pinned framework.
+    for(int i=0;i<n&&i<256&&count<20;i++){
+      String name=WiFi.SSID(i);if(name.isEmpty())continue;
+      bool duplicate=false;for(int j=0;j<count;j++)if(seen[j]==name){duplicate=true;break;}
+      if(duplicate)continue;
+      seen[count++]=name;auto network=networks.add<JsonObject>();
+      network["ssid"]=name;network["rssi"]=WiFi.RSSI(i);network["secure"]=WiFi.encryptionType(i)!=WIFI_AUTH_OPEN;
+    }
+    WiFi.scanDelete();scanActive=false;reply(200,d);
   });
   web.on("/api/v1/assets",HTTP_POST,[]{
     if(!auth()||!writable())return;
@@ -195,8 +224,9 @@ void setup(){
   JsonDocument d;String stored=prefs.getString("schedule","");int n,offset;
   if(!deserializeJson(d,stored)&&parseSchedule(d,events,n,offset)){eventCount=n;utcOffset=offset;automatic=d["enabled"];}
   if(RECOVERY_MODE){
-    automatic=false;source="recovery";fsReady=false;
-    Serial.println("[boot] recovery: display task, SPI, framebuffer, filesystem and station Wi-Fi disabled");
+    automatic=false;source=MODE_NAME;fsReady=false;
+    Serial.println("[boot] recovery: display task, SPI, framebuffer and filesystem disabled");
+    Serial.printf("[boot] station Wi-Fi setup=%s\n",RECOVERY_WIFI?"enabled; connect from panel":"disabled");
   }else{
   Serial.println("[boot] phase=filesystem");Serial.flush();
   fsReady=LittleFS.begin(false,"/littlefs",5,"littlefs"); // Never auto-format the factory filesystem.
@@ -210,6 +240,8 @@ void setup(){
   bool apOK=WiFi.softAP(("AviorSign-"+String((uint32_t)ESP.getEfuseMac(),HEX)).c_str(),apPassword.c_str());
   if(RECOVERY_MODE)WiFi.setTxPower(WIFI_POWER_8_5dBm);
   Serial.printf("[boot] access_point=%s\n",apOK?"ready":"failed");
+  // Wi-Fi recovery deliberately waits for a panel request, even with saved credentials.
+  // This preserves an AP-only baseline until the owner starts the next test.
   if(!RECOVERY_MODE){
     ssid=prefs.getString("ssid","");wifiPassword=prefs.getString("wifi","");if(ssid.length())WiFi.begin(ssid.c_str(),wifiPassword.c_str());
     configTime(0,0,"pool.ntp.org","time.google.com");MDNS.begin("avior");MDNS.addService("http","tcp",80);
@@ -219,6 +251,7 @@ void setup(){
 }
 void loop(){
   web.handleClient();Result r;
+  if(scanActive&&millis()-scanStarted>30000&&WiFi.scanComplete()!=WIFI_SCAN_RUNNING){WiFi.scanDelete();scanActive=false;}
   if(results&&xQueueReceive(results,&r,0)==pdTRUE){rendering=false;lastRefresh=millis();if(r.ok){displayed=r.status;displayError="";}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
   if(millis()-lastTick>1000){
     lastTick=millis();time_t now=time(nullptr);
@@ -227,7 +260,7 @@ void loop(){
   }
   if(millis()-lastHealth>=5000){
     lastHealth=millis();
-    Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u reset=%s(%d)\n",RECOVERY_MODE?"recovery":"normal",(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),resetName(bootReason),(int)bootReason);
+    Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),(int)WiFi.status(),resetName(bootReason),(int)bootReason);
   }
   delay(2);
 }
