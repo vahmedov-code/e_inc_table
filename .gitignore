@@ -1,0 +1,12 @@
+.pio/
+.venv/
+.vscode/
+include/secrets.h
+*.bin
+*.elf
+*.map
+*factory*
+*backup*
+private/
+__pycache__/
+tmp/
