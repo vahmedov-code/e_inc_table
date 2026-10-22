@@ -14,6 +14,8 @@ Version 0.1.3 changes connectivity reporting to a sampled SDK snapshot: operatin
 
 Version 0.2.0 stops the radio (AP and STA) for the duration of each panel refresh, about 25 s including the 1.5 s grace period after the request; HTTP is unreachable during that time and `busy` is true before and after. Wi-Fi setup and scan return 409 while a refresh runs. State adds `interruptedPhase`, `renderAborts`, `minHeap`, `workerStackFree`. After a reset during a refresh, automatic refresh stays blocked (reported in `displayError`) until a manual `POST /status` or a successful refresh.
 
+Version 0.2.1 fixes `PUT /schedule`, which rejected every schedule (see VALIDATION.md), and adds battery fields to state: `adcProbe` maps each ADC1 input (GPIO 32, 33, 34, 35, 36, 39) to its calibrated millivolts, sampled every 5 s outside refreshes; `battery` `{pin, mv, percent, divider}` is present only when one input reads inside the Li-ion window behind the assumed 1:2 divider. Pin and ratio are inferred, not taken from a schematic.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.

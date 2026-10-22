@@ -1,5 +1,11 @@
 # Validation — 2026-10-21
 
+## Update 0.2.1: schedule fix and battery estimate
+
+Owner report: saving a valid one-event schedule (Thursday 21:00, closed) failed with "Проверьте дни, время, статусы…". Cause: `parseSchedule` takes a `const JsonDocument&`, and in ArduinoJson 7 `is<JsonArray>()` on a const variant is always false, so every schedule was rejected and the stored one was never loaded at boot. Confirmed on the host against the pinned ArduinoJson. The parser now lives in `include/schedule_json.h`, uses `is<JsonArrayConst>()`, and `tools/test_schedule.cpp` runs it with the real library (valid schedule accepted; empty enabled, duplicate, `image`, out-of-range day, minute and offset, non-array rejected). The test fails on the old check. CI runs it.
+
+Battery: the owner's photo of the V3.0 board shows two resistors R8/R9 beside the battery connector with a trace to the module, most likely a divider. The schematic is still unavailable, so the firmware samples all ADC1 inputs and reports the one whose reading ×2 falls in 3.0–4.4 V as the battery, with an approximate rested Li-ion percentage. The panel shows it in the top bar and lists every input's millivolts under «Устройство». Unverified: which pin, the ratio, behaviour without a battery or while charging. A multimeter reading at the battery will calibrate it.
+
 ## Panel redesign 0.2.0
 
 The owner asked for a panel where results are visible without scrolling back up, and for replaceable pictures on every status.

@@ -19,6 +19,8 @@
 #include <atomic>
 #include <time.h>
 #include "schedule.h"
+#include "schedule_json.h"
+#include "battery.h"
 #include "web_ui.h"
 
 WebServer web(80);
@@ -47,6 +49,17 @@ constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
 constexpr bool RADIO_OFF_DURING_REFRESH=true;
 constexpr uint32_t RADIO_OFF_GRACE_MS=1500;
 int pendingJob=-1;uint32_t pendingSince=0;bool radioPaused=false;
+int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
+// Skipped during a refresh: the panel load would read as a discharged battery.
+void sampleBattery(){
+  if(rendering)return;
+  int best=0;batteryPin=-1;
+  for(int i=0;i<ADC_PROBE_COUNT;i++){
+    uint32_t sum=0;for(int k=0;k<8;k++)sum+=analogReadMilliVolts(ADC_PROBE_PINS[i]);adcMv[i]=sum/8;
+    if(plausibleBattery(adcMv[i])&&adcMv[i]>best){best=adcMv[i];batteryPin=ADC_PROBE_PINS[i];}
+  }
+  batteryMv=best*BATTERY_DIVIDER;
+}
 uint32_t scanStarted=0;
 struct WifiSnapshot {
   WifiEvidence evidence{};
@@ -107,19 +120,6 @@ void scheduleJson(JsonDocument& d){
   for(int i=0;i<eventCount;i++){auto e=a.add<JsonObject>();e["day"]=events[i].day;e["minute"]=events[i].minute;e["status"]=keys[events[i].status];}
 }
 void saveSchedule(){JsonDocument d;scheduleJson(d);String s;serializeJson(d,s);prefs.putString("schedule",s);}
-bool parseSchedule(const JsonDocument& d,Event* out,int& count,int& offset){
-  if(!d["enabled"].is<bool>() || !d["utcOffsetMinutes"].is<int>() || !d["events"].is<JsonArray>())return false;
-  offset=d["utcOffsetMinutes"];if(offset < -720 || offset>840)return false;
-  auto a=d["events"].as<JsonArrayConst>();if(a.size()>32)return false;count=0;
-  for(auto e:a){
-    if(!e["day"].is<int>() || !e["minute"].is<int>() || !e["status"].is<const char*>())return false;
-    int day=e["day"],minute=e["minute"],s=statusIndex(e["status"].as<String>());
-    if(day<0||day>6||minute<0||minute>1439||s<0||s>2)return false;
-    for(int i=0;i<count;i++)if(out[i].day==day&&out[i].minute==minute)return false;
-    out[count++]={(uint8_t)day,(uint16_t)minute,(uint8_t)s};
-  }
-  return !d["enabled"].as<bool>() || count>0;
-}
 Preferences tracePrefs;
 void clearRenderBlock(){
   if(RECOVERY_MODE||interruptedPhase==PHASE_IDLE)return;
@@ -193,6 +193,8 @@ void state(){
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;}
+  auto probe=d["adcProbe"].to<JsonObject>();for(int i=0;i<ADC_PROBE_COUNT;i++)probe[String(ADC_PROBE_PINS[i])]=adcMv[i];
   d["cooldownSeconds"]=lastRefresh&&millis()-lastRefresh<60000?(60000-(millis()-lastRefresh))/1000:0;
   auto assets=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)assets[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));reply(200,d);
 }
@@ -349,7 +351,7 @@ void setup(){
     configTime(0,0,"pool.ntp.org","time.google.com");MDNS.begin("avior");MDNS.addService("http","tcp",80);
   }
   Serial.printf("\nAviorSign setup\nAP password: %s\nAPI token: %s\nOpen http://192.168.4.1\n",apPassword.c_str(),token.c_str());
-  routes();Serial.println("[boot] ready; health log every 5 seconds");
+  sampleBattery();routes();Serial.println("[boot] ready; health log every 5 seconds");
 }
 void loop(){
   web.handleClient();Result r;
@@ -366,7 +368,9 @@ void loop(){
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }
   if(millis()-lastHealth>=5000){
-    lastHealth=millis();
+    lastHealth=millis();sampleBattery();
+    Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?batteryPercent(batteryMv):-1);
+    for(int i=0;i<ADC_PROBE_COUNT;i++)Serial.printf(" %d:%d",ADC_PROBE_PINS[i],adcMv[i]);Serial.println();
     WifiSnapshot wifi=wifiSnapshot();
     Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%s arduino_wifi=%d ip=%s associated=%d netif_up=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),stationStateName(wifi.state()),wifi.evidence.arduinoStatus,wifi.state()==StationState::Connected?wifi.address.toString().c_str():"0.0.0.0",wifi.evidence.associated,wifi.evidence.interfaceUp,resetName(bootReason),(int)bootReason);
   }

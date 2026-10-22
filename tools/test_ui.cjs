@@ -80,6 +80,10 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.equal(requests.filter(r=>r.url.includes('/assets')).length,before,'no upload without storage');assert.match(d.getElementById('feedback').textContent,/хранилище/);
  device.storageReady=true;device.assets={closed:true};await w.refresh();await tick();
  assert.equal(d.querySelector('[data-kind="closed"]').textContent,'своя картинка','saved pictures are loaded as thumbnails');
+ assert.equal(d.getElementById('battery').hidden,true,'no battery pill without a reading');
+ device.battery={pin:35,mv:3950,percent:71,divider:2};device.adcProbe={'32':0,'35':1975};await w.refresh();
+ assert.equal(d.getElementById('battery').textContent,'АКБ ≈71 % · 3,95 В');assert.match(d.getElementById('adcProbe').textContent,/GPIO35 1975/);
+ device.battery.percent=10;await w.refresh();assert.match(d.getElementById('battery').className,/bad/,'low battery highlighted');
  device.busy=true;device.hardwareConfirmed=true;await w.refresh();
  assert.match(d.getElementById('deviceState').textContent,/Wi‑Fi временно выключен/);assert.equal(d.getElementById('publish').disabled,true);
  device.busy=false;await w.refresh();
