@@ -8,7 +8,7 @@ const deps=createRequire(resolve(__dirname,'../.pio/ui-tests/package.json'));
 const {JSDOM,VirtualConsole}=deps('jsdom');
 const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
-const device={version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
+const device={crm:{enabled:false,url:'https://cms.avior.moscow',configured:false,error:''},version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
 let scanMode='ok',scanPolls=0;
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
@@ -30,6 +30,7 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
      }
      if(url.includes('/asset?slot=')&&opts.method==='GET')return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0xff).buffer};
      if(url.endsWith('/qr'))return {ok:true,status:200,json:async()=>device.qrEnabled?{enabled:true,size:3,rows:['101','010','101']}:{enabled:false,size:3,rows:['101','010','101']}};
+     if(url.endsWith('/crm'))device.crm={enabled:data.enabled,url:data.url,configured:device.crm.configured||!!data.token,error:'',lastOkSeconds:data.enabled?3:undefined};
      if(url.endsWith('/settings'))Object.assign(device,{qrEnabled:data.qrEnabled,qrUrl:data.qrUrl});
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
      if(url.endsWith('/schedule')&&opts.method==='PUT'){schedule=data;device.automatic=data.enabled;}
@@ -70,6 +71,12 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  d.getElementById('qrUrl').value='https://avior.moscow/na-svyazi/';await click('saveQr');await tick();assert.equal(device.qrEnabled,true);
  const fw=d.getElementById('fwFile');Object.defineProperty(fw,'files',{configurable:true,value:[new w.File([new Uint8Array(200000)],'firmware.bin')]});
  await click('fwUpload');await tick();assert.match(d.getElementById('feedback').textContent,/не файл прошивки/,'non-ESP32 image rejected in the browser');
+ assert.match(d.getElementById('crmStatus').textContent,/выключена/);
+ d.getElementById('crmEnabled').checked=true;d.getElementById('crmToken').value='abc123';await click('saveCrm');await tick();
+ const crmReq=requests.findLast(r=>r.url.endsWith('/crm'));assert.equal(JSON.parse(crmReq.opts.body).token,'abc123');
+ assert.equal(d.getElementById('crmToken').value,'','token field cleared after save');assert.match(d.getElementById('crmStatus').textContent,/На связи с CRM/);
+ await click('saveCrm');assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/crm')).opts.body).token,undefined,'empty field keeps the stored token');
+ device.crm.error='CRM ответила 401: Неверный токен';await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/401/);
  d.querySelector('[data-status="open"]').click();await tick();
  assert.match(d.getElementById('clockState').textContent,/МСК/,'clock shown in schedule time zone, not UTC');
  assert.match(d.getElementById('clockState').textContent,/16:00/,'1792587600 is 16:00 Moscow time');

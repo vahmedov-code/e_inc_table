@@ -34,7 +34,8 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <nav class="tabs" role="tablist"><button role="tab" aria-selected="true" aria-controls="tabSchedule" id="tabBtnSchedule">Расписание</button><button role="tab" aria-selected="false" aria-controls="tabWifi">Wi‑Fi</button><button role="tab" aria-selected="false" aria-controls="tabDevice">Устройство</button></nav>
 <section class="card tabpanel" id="tabSchedule" role="tabpanel"><div class="schedule-head"><div><h2>Недельное расписание</h2><p class="muted" style="margin:6px 0 0">Статус держится до следующего события, в том числе ночью и в выходные.</p></div><label>Часовой пояс<select id="timezone"><option value="180">Москва · UTC+3</option><option value="0">UTC</option><option value="60">UTC+1</option><option value="120">UTC+2</option><option value="240">UTC+4</option><option value="300">UTC+5</option></select></label></div><div id="events" class="schedule-list"></div><div class="actions"><button id="addEvent">Добавить событие</button><button class="primary" id="saveSchedule">Сохранить и включить</button><button id="pauseSchedule">Выключить расписание</button></div><div class="clock" id="clockBox"><span id="clockState">Время вывески неизвестно.</span><button id="syncClock">Установить время с этого устройства</button></div></section>
 <section class="card tabpanel" id="tabWifi" role="tabpanel" hidden><form id="wifiForm"><div class="form-grid"><label>Доступные сети 2,4 ГГц<select id="wifiNetworks"><option value="">Сначала нажмите «Найти сети»</option></select></label><button id="scanWifi" type="button" style="align-self:end">Найти сети</button></div><p class="caption" id="wifiScanStatus" role="status">Поиск выполняет сама вывеска. Для скрытой сети введите имя вручную.</p><div class="form-grid"><label>Имя сети<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><div class="actions"><button id="wifiConnect" class="primary">Подключить к сети</button></div><p class="caption">Точка доступа вывески остаётся доступной. Адрес в сети появится вверху страницы.</p></form></section>
-<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
+<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">Avior CRM</h3><p class="muted" id="crmStatus">Не подключено.</p><label class="check"><input id="crmEnabled" type="checkbox"><span>Управлять вывеской из CRM: «Инструменты» → «Вывеска на двери». Вывеска сама опрашивает CRM раз в ~10 секунд.</span></label><div class="form-grid"><label>Адрес CRM<input id="crmUrl" type="url" maxlength="120" value="https://cms.avior.moscow"></label><label>Токен вывески из CRM<input id="crmToken" type="password" autocomplete="off" maxlength="128" placeholder="пусто — оставить прежний"></label></div><div class="actions"><button id="saveCrm">Сохранить связь с CRM</button></div>
+<h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
 <h3 style="margin-top:20px">Обновление прошивки</h3><p class="muted" id="fwStatus">Версия неизвестна.</p><div class="actions"><label class="filebtn">Выбрать firmware.bin<input id="fwFile" type="file" accept=".bin,application/octet-stream"></label><button class="primary" id="fwUpload">Загрузить и перезапустить</button></div><progress id="fwProgress" max="1" value="0" hidden style="width:100%;margin-top:10px"></progress><p class="caption">Файл из <code>.pio\build\esp32-m075-v3\firmware.bin</code> после сборки. Новая версия первую минуту проверяется: если вывеска за это время перезагрузится, автоматически вернётся прежняя.</p>
 <h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
 </main><footer><span id="version">AviorSign</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
@@ -44,7 +45,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 const $=id=>document.getElementById(id),labels={open:'Открыто',closed:'Закрыто',soon:'Скоро буду',image:'Своё изображение',unknown:'неизвестно'},slots=['open','closed','soon','image'];
 const canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
 const work=document.createElement('canvas');work.width=800;work.height=480;const wctx=work.getContext('2d',{willReadFrequently:true});
-let qrRows=null,qrKey='',settingsShown=false;
+let qrRows=null,qrKey='',settingsShown=false,crmShown=false;
 let selected='closed',key=sessionStorage.getItem('aviorKey')||'',state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
 // Saved frame per slot: Uint8Array, null when the device has none, undefined before the first check.
 const assets={};
@@ -173,7 +174,12 @@ async function refresh(){
  if(!settingsShown&&state.qrUrl!==undefined){$('qrEnabled').checked=!!state.qrEnabled;$('qrUrl').value=state.qrUrl;settingsShown=true;}
  const k=state.qrEnabled+'|'+state.qrUrl;if(k!==qrKey){qrKey=k;loadQr();}
  $('fwStatus').textContent='Сейчас работает версия '+(state.version||'?')+(state.otaPending?' · новая прошивка проверяется первую минуту; при сбое вернётся прежняя.':'.');
- $('saveQr').disabled=!!state.recovery;
+ $('saveQr').disabled=!!state.recovery;$('saveCrm').disabled=!!state.recovery;
+ const crm=state.crm;
+ if(crm){
+  if(!crmShown){$('crmEnabled').checked=!!crm.enabled;$('crmUrl').value=crm.url;crmShown=true;}
+  $('crmStatus').textContent=!crm.enabled?'Связь с CRM выключена.':crm.error?'Ошибка связи с CRM: '+crm.error:crm.lastOkSeconds!==undefined?'На связи с CRM · '+crm.lastOkSeconds+' с назад.':'Подключается к CRM…';
+ }
  showClock();updateButtons();loadAssets();
 }
 const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -239,6 +245,12 @@ $('scanWifi').onclick=()=>run(async()=>{
 });
 $('enableHardware').onclick=()=>run(async()=>{if(!$('confirmHardware').checked)throw Error('Сначала подтвердите проверку платы и матрицы.');await api('hardware','POST',{confirmation:'ESP32-M075-V3.0:F53:18,23,27,14,12,13'});await refresh();feedback('Обновление дисплея разрешено.');});
 $('initStorage').onclick=()=>run(async()=>{if(!$('confirmStorage').checked)throw Error('Отметьте согласие на форматирование раздела картинок.');await api('storage/init','POST',{confirmation:'FORMAT_AVIOR_STORAGE'});await refresh();feedback('Хранилище готово. Можно сохранять картинки.');});
+$('saveCrm').onclick=()=>run(async()=>{
+ const url=$('crmUrl').value.trim(),token=$('crmToken').value.trim(),body={enabled:$('crmEnabled').checked,url};if(token)body.token=token;
+ if(!/^https?:\/\/\S+$/.test(url))throw Error('Укажите адрес CRM полностью, начиная с https');
+ await api('crm','PUT',body);$('crmToken').value='';await refresh();
+ feedback(body.enabled?'Связь с CRM сохранена. Через 10–20 секунд вывеска появится в CRM.':'Связь с CRM выключена.');
+});
 $('saveQr').onclick=()=>run(async()=>{
  const url=$('qrUrl').value.trim();if(!/^https?:\/\/\S+$/.test(url))throw Error('Укажите полную ссылку, начиная с https');
  await api('settings','PUT',{qrEnabled:$('qrEnabled').checked,qrUrl:url});await refresh();await loadQr();

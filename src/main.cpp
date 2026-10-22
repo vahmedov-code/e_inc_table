@@ -11,6 +11,8 @@
 #include <esp_ota_ops.h>
 #include <Update.h>
 #include <qrcode.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -25,6 +27,7 @@
 #include "schedule_json.h"
 #include "battery.h"
 #include "qr_matrix.h"
+#include "crm_roots.h"
 #include "web_ui.h"
 
 WebServer web(80);
@@ -71,6 +74,15 @@ bool makeQr(const String& text){
   bool ok=esp_qrcode_generate(&c,text.c_str())==ESP_OK&&m.size>0;qrOut=nullptr;
   if(ok)qr=m;return ok;
 }
+// Avior CRM: the sign is behind the office NAT, so it polls the CRM, reports its state
+// and applies items whose CRM seq is newer than the one it already applied.
+const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
+bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
+uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image"};
+constexpr int CRM_ITEM_COUNT=7;
+uint32_t crmApplied[CRM_ITEM_COUNT]={0};
+Preferences crmPrefs;
 int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
 // Skipped during a refresh: the panel load would read as a discharged battery.
 void sampleBattery(){
@@ -222,6 +234,8 @@ void state(){
   d["timeValid"]=time(nullptr)>1700000000;
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["otaPending"]=otaPending;d["qrEnabled"]=qrEnabled;d["qrUrl"]=qrUrl;
+  {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
+   if(crmEverOk)c["lastOkSeconds"]=(millis()-crmLastOk)/1000;}
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;}
@@ -242,6 +256,98 @@ void upload(){
   }else if(u.status==UPLOAD_FILE_END){
     if(uploadFile)uploadFile.close();uploadOK=uploadOK&&uploadBytes==FRAME_BYTES;
   }else if(u.status==UPLOAD_FILE_ABORTED){if(uploadFile)uploadFile.close();uploadOK=false;if(fsReady)LittleFS.remove("/upload.tmp");}
+}
+void crmResetApplied(){for(int i=0;i<CRM_ITEM_COUNT;i++){crmApplied[i]=0;crmPrefs.putUInt(CRM_ITEMS[i],0);}}
+void crmMarkApplied(int item,uint32_t seq){crmApplied[item]=seq;crmPrefs.putUInt(CRM_ITEMS[item],seq);}
+String crmReport(){
+  JsonDocument d;WifiSnapshot wifi=wifiSnapshot();
+  d["version"]=FW_VERSION;d["mode"]=MODE_NAME;d["desired"]=keys[desired];d["displayed"]=displayed<0?"unknown":keys[displayed];
+  d["busy"]=rendering.load();d["displayError"]=displayError;d["automatic"]=automatic;d["source"]=source;
+  d["uptimeSeconds"]=millis()/1000;d["resetReason"]=resetName(bootReason);d["heap"]=ESP.getFreeHeap();d["otaPending"]=otaPending;
+  d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"";d["rssi"]=WiFi.RSSI();
+  d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);}
+  auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
+  JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
+  auto a=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)a[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));
+  auto ap=d["applied"].to<JsonObject>();for(int i=0;i<CRM_ITEM_COUNT;i++)ap[CRM_ITEMS[i]]=crmApplied[i];
+  String out;serializeJson(d,out);return out;
+}
+// One HTTPS request to the CRM with the sign token; plain http only for a test server.
+int crmRequest(HTTPClient& http,WiFiClientSecure& tls,WiFiClient& plain,const String& url){
+  if(url.startsWith("https://")){tls.setCACert(CRM_ROOT_CAS);if(!http.begin(tls,url))return -1;}
+  else if(!http.begin(plain,url))return -1;
+  http.setTimeout(8000);http.addHeader("Authorization","Bearer "+crmToken);http.addHeader("X-Sign-Token",crmToken);
+  return 0;
+}
+String crmFail(HTTPClient& http,int code){
+  if(code<0)return String("Нет связи с CRM: ")+HTTPClient::errorToString(code);
+  JsonDocument e;String body=http.getString();
+  return "CRM ответила "+String(code)+(deserializeJson(e,body)||!e["error"].is<const char*>()?String():String(": ")+e["error"].as<const char*>());
+}
+// Downloads one 96000-byte frame into LittleFS through a temporary file.
+bool crmDownload(int slot){
+  if(!fsReady){crmError="Хранилище картинок не подготовлено — картинка из CRM ждёт";return false;}
+  HTTPClient http;WiFiClientSecure tls;WiFiClient plain;
+  if(crmRequest(http,tls,plain,crmUrl+"/api/sign/asset.php?slot="+keys[slot])<0){crmError="Неверный адрес CRM";return false;}
+  int code=http.GET(),size=code==200?http.getSize():0;
+  if(code!=200||(size!=-1&&size!=(int)FRAME_BYTES)){crmError=crmFail(http,code);http.end();return false;}
+  File f=LittleFS.open("/crm.tmp","w");int written=f?http.writeToStream(&f):-1;if(f)f.close();http.end();
+  if(written!=(int)FRAME_BYTES||!LittleFS.rename("/crm.tmp",assetPath(slot))){LittleFS.remove("/crm.tmp");crmError="Картинка из CRM не сохранилась";return false;}
+  return true;
+}
+// Applies what the CRM changed since the last applied seq; returns true when something changed.
+bool crmApply(JsonDocument& r){
+  bool changed=false;
+  for(int slot=0;slot<4;slot++){
+    JsonObject a=r["assets"][keys[slot]];uint32_t seq=a["seq"]|0;
+    if(!seq||seq<=crmApplied[3+slot])continue;
+    bool ok=a["present"].as<bool>()?crmDownload(slot):(!fsReady||!LittleFS.exists(assetPath(slot))||LittleFS.remove(assetPath(slot)));
+    if(!ok)continue;
+    crmMarkApplied(3+slot,seq);changed=true;if(slot==desired)displayed=-1;
+    Serial.printf("[crm] picture %s %s\n",keys[slot],a["present"].as<bool>()?"downloaded":"removed");
+  }
+  uint32_t seq=r["qr"]["seq"]|0;
+  if(seq>crmApplied[2]){
+    String url=r["qr"]["url"]|"";
+    if(makeQr(url)){qrEnabled=r["qr"]["enabled"]|true;qrUrl=url;prefs.putBool("qrOn",qrEnabled);prefs.putString("qrUrl",qrUrl);
+      if(desired<3&&!(fsReady&&LittleFS.exists(assetPath(desired))))displayed=-1;changed=true;}
+    crmMarkApplied(2,seq);
+  }
+  // A manual status turns the schedule off and a saved schedule turns it on: apply both in CRM order.
+  uint32_t statusSeq=r["status"]["seq"]|0,scheduleSeq=r["schedule"]["seq"]|0;
+  auto applySchedule=[&]{
+    if(scheduleSeq<=crmApplied[1])return;
+    JsonDocument sd;sd.set(r["schedule"]["value"]);Event next[32];int n,offset;
+    if(parseSchedule(sd,next,n,offset)){memcpy(events,next,n*sizeof(Event));eventCount=n;utcOffset=offset;automatic=sd["enabled"];if(automatic)source="schedule";saveSchedule();changed=true;}
+    else crmError="Расписание из CRM не прошло проверку";
+    crmMarkApplied(1,scheduleSeq);
+  };
+  auto applyStatus=[&]{
+    if(statusSeq<=crmApplied[0])return;
+    int s=statusIndex(r["status"]["value"]|"");
+    if(s==3&&!(fsReady&&LittleFS.exists(assetPath(3))))crmError="В CRM выбрано «Своё изображение», но на вывеске его нет";
+    else if(s>=0){desired=s;automatic=false;source="crm";prefs.putInt("desired",s);saveSchedule();displayError="";clearRenderBlock();changed=true;}
+    crmMarkApplied(0,statusSeq);
+  };
+  if(statusSeq<scheduleSeq){applyStatus();applySchedule();}else{applySchedule();applyStatus();}
+  return changed;
+}
+void crmSync(){
+  crmLastTry=millis();
+  HTTPClient http;WiFiClientSecure tls;WiFiClient plain;
+  if(crmRequest(http,tls,plain,crmUrl+"/api/sign/sync.php")<0){crmError="Неверный адрес CRM";return;}
+  http.addHeader("Content-Type","application/json");
+  int code=http.POST(crmReport());
+  if(code!=200){crmError=crmFail(http,code);http.end();Serial.printf("[crm] %s\n",crmError.c_str());return;}
+  JsonDocument r;DeserializationError err=deserializeJson(r,http.getString());http.end();
+  if(err||!r["ok"].as<bool>()){crmError="Непонятный ответ CRM";return;}
+  crmError="";crmLastOk=millis();crmEverOk=true;
+  crmIntervalMs=constrain((int)(r["pollSeconds"]|10),5,300)*1000UL;
+  if(crmApply(r)){
+    requestDisplay();
+    crmLastTry=millis()-crmIntervalMs+1500; // report the result right away
+  }
 }
 void firmwareUpload(){
   auto& u=web.upload();
@@ -368,6 +474,19 @@ void routes(){
     if(desired<3&&!(fsReady&&LittleFS.exists(assetPath(desired))))displayed=-1;
     requestDisplay();state();
   });
+  web.on("/api/v1/crm",HTTP_PUT,[]{
+    if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
+    if(!d["enabled"].is<bool>()||!d["url"].is<const char*>()){error(400,"Требуются enabled и url");return;}
+    String url=d["url"].as<const char*>();url.trim();while(url.endsWith("/"))url.remove(url.length()-1);
+    String token=d["token"].is<const char*>()?d["token"].as<const char*>():"";token.trim();
+    if(url.length()>120||!(url.startsWith("https://")||url.startsWith("http://"))){error(400,"Адрес CRM должен начинаться с https://");return;}
+    if(token.length()>128){error(400,"Слишком длинный токен");return;}
+    if((token.length()&&token!=crmToken)||url!=crmUrl)crmResetApplied(); // another CRM or sign: start from scratch
+    if(token.length()){crmToken=token;crmPrefs.putString("token",crmToken);}
+    if(d["enabled"].as<bool>()&&!crmToken.length()){error(400,"Введите токен вывески из CRM");return;}
+    crmUrl=url;crmEnabled=d["enabled"];crmPrefs.putString("url",crmUrl);crmPrefs.putBool("on",crmEnabled);
+    crmError="";crmLastTry=0;state();
+  });
   web.on("/api/v1/qr",HTTP_GET,[]{
     if(!auth())return;JsonDocument d;d["enabled"]=qrEnabled;d["url"]=qrUrl;d["size"]=qr.size;
     auto rows=d["rows"].to<JsonArray>();
@@ -388,6 +507,9 @@ void setup(){
     otaPending=running&&esp_ota_get_state_partition(running,&ota)==ESP_OK&&ota==ESP_OTA_IMG_PENDING_VERIFY;
     Serial.printf("[boot] app=%s ota_pending=%d\n",running?running->label:"?",otaPending);
   }
+  crmPrefs.begin("avior-crm",RECOVERY_MODE);
+  crmEnabled=!RECOVERY_MODE&&crmPrefs.getBool("on",false);crmUrl=crmPrefs.getString("url",DEFAULT_CRM_URL);crmToken=crmPrefs.getString("token","");
+  for(int i=0;i<CRM_ITEM_COUNT;i++)crmApplied[i]=crmPrefs.getUInt(CRM_ITEMS[i],0);
   qrEnabled=prefs.getBool("qrOn",true);qrUrl=prefs.getString("qrUrl",DEFAULT_QR_URL);
   if(!makeQr(qrUrl)){qrUrl=DEFAULT_QR_URL;makeQr(qrUrl);}
   confirmed=!RECOVERY_MODE&&prefs.getBool("hardware",false);desired=constrain(prefs.getInt("desired",1),0,3);
@@ -452,6 +574,9 @@ void loop(){
     if(automatic&&now>1700000000){source="schedule";now+=utcOffset*60;tm t;gmtime_r(&now,&t);int s=scheduledStatus(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);if(s>=0&&desired!=s){desired=s;displayError="";}}
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }
+  // TLS needs about 40 KB; skipped while the radio is off for a refresh or an upload runs.
+  if(crmEnabled&&crmToken.length()&&!rendering&&!radioPaused&&!otaBusy&&!restartAt&&time(nullptr)>1700000000
+     &&WiFi.status()==WL_CONNECTED&&ESP.getMaxAllocHeap()>45000&&millis()-crmLastTry>=crmIntervalMs)crmSync();
   if(millis()-lastHealth>=5000){
     lastHealth=millis();sampleBattery();
     Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?batteryPercent(batteryMv):-1);
