@@ -11,3 +11,8 @@ static_assert(scheduledStatus(week,3,5,1080)==2,"Friday boundary");
 static_assert(scheduledStatus(week,3,0,0)==2,"Sunday boundary");
 constexpr Event unsorted[]={{1,1080,1},{1,540,0}};
 static_assert(scheduledStatus(unsorted,2,1,600)==0,"order independent");
+static_assert(minutesToNextEvent(week,0,1,600)==-1,"no events, no wake");
+static_assert(minutesToNextEvent(week,3,1,539)==1,"one minute before opening");
+static_assert(minutesToNextEvent(week,3,1,540)==540,"at opening the next is closing");
+static_assert(minutesToNextEvent(week,3,5,1081)==3779,"Friday 18:01 to Monday 09:00");
+static_assert(minutesToNextEvent(week,1,1,540)==10080,"single event: a week ahead");

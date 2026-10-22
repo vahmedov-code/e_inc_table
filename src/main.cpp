@@ -13,6 +13,9 @@
 #include <qrcode.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
+#include <esp_sntp.h>
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -56,6 +59,21 @@ constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
 constexpr bool RADIO_OFF_DURING_REFRESH=true;
 constexpr uint32_t RADIO_OFF_GRACE_MS=1500;
 int pendingJob=-1;uint32_t pendingSince=0;bool radioPaused=false;
+// Battery mode: radio off and light sleep between short wakes (next schedule event, every
+// POWER_WAKE_MINUTES for the CRM, or the board button). Light sleep, not deep sleep: the
+// only button is GPIO0, a boot strap, and a deep-sleep wake while it is held would start
+// the ROM download mode instead of the firmware.
+constexpr uint32_t POWER_WAKE_MINUTES=15,BUTTON_AWAKE_MS=180000,TIMER_AWAKE_MS=60000,REQUEST_AWAKE_MS=600000;
+bool powerSave=false,sessionWake=true,crmDoneThisWake=false;uint32_t awakeUntil=0;const char* wakeReason="boot";
+uint32_t sleepTestAt=0,sleepTestSeconds=0,wokeAt=0;bool timeSyncWanted=false;
+volatile uint32_t ntpSyncedAt=0;
+void onTimeSync(struct timeval*){ntpSyncedAt=millis();}
+void stayAwake(uint32_t ms){if((int32_t)(millis()+ms-awakeUntil)>0)awakeUntil=millis()+ms;}
+// The access point is for setup only: on with no saved network, after the office network
+// has been gone for a minute (not in battery mode), or for 10 minutes after holding the
+// board button for a second. It is never dropped while a phone is still connected to it.
+constexpr uint32_t AP_BUTTON_MS=600000,AP_FALLBACK_MS=60000;
+uint32_t apUntil=0,staLostAt=0,buttonDownAt=0;
 // A freshly updated image stays pending until it has run for OTA_CONFIRM_MS; a reset
 // before that makes the bootloader return to the previous image.
 extern "C" bool verifyRollbackLater(){return true;}
@@ -79,8 +97,8 @@ bool makeQr(const String& text){
 const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
 bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
 uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
-const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image"};
-constexpr int CRM_ITEM_COUNT=7;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake"};
+constexpr int CRM_ITEM_COUNT=9;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 Preferences crmPrefs;
 int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
@@ -143,7 +161,8 @@ void reply(int code,const JsonDocument& d){String s;serializeJson(d,s);web.sendH
 void error(int code,const char* msg){JsonDocument d;d["error"]=msg;reply(code,d);}
 bool writable(bool wifi=false){if(canMutate(wifi))return true;error(423,"Диагностический режим: это действие отключено");return false;}
 bool authorized(){return web.header("Authorization")=="Bearer "+token;}
-bool auth(){if(authorized())return true;error(401,"Требуется ключ доступа из Serial Monitor");return false;}
+// Only changes keep a battery-mode sign awake: an open panel polls state every 5 s.
+bool auth(){if(authorized()){if(powerSave&&web.method()!=HTTP_GET)stayAwake(60000);return true;}error(401,"Требуется ключ доступа из Serial Monitor");return false;}
 bool body(JsonDocument& d){
   if(web.arg("plain").length()>8192 || deserializeJson(d,web.arg("plain"))){error(400,"Некорректный JSON или превышен лимит 8192 байта");return false;}
   if(!d.is<JsonObject>()){error(400,"Ожидается JSON-объект");return false;}return true;
@@ -174,20 +193,29 @@ void worker(void*) {
       bool loaded=false;
       if(fsReady){File f=LittleFS.open(assetPath(s),"r");if(f&&f.size()==FRAME_BYTES)loaded=f.read(data,FRAME_BYTES)==FRAME_BYTES;f.close();}
       if(!loaded && s==3)ok=false;
-      if(ok&&!loaded){
-        memset(data,0x55,FRAME_BYTES);Frame f(data);
-        f.fillRect(40,40,720,8,s==1?3:s==2?2:0);
-        f.setTextColor(0);f.setTextSize(5);f.setCursor(44,85);f.print("AVIOR");
-        ScaledText text(f,4);U8G2_FOR_ADAFRUIT_GFX font;font.begin(text);font.setFont(u8g2_font_unifont_t_cyrillic);
-        font.setForegroundColor(0);font.setBackgroundColor(1);font.setCursor(11,66);font.print(names[s]);
-        f.setTextSize(2);f.setCursor(44,410);f.print("avior.local");
+      if(ok){
+        Frame f(data);
+        if(!loaded){
+          memset(data,0x55,FRAME_BYTES);
+          f.fillRect(40,40,720,8,s==1?3:s==2?2:0);
+          f.setTextColor(0);f.setTextSize(5);f.setCursor(44,85);f.print("AVIOR");
+          ScaledText text(f,4);U8G2_FOR_ADAFRUIT_GFX font;font.begin(text);font.setFont(u8g2_font_unifont_t_cyrillic);
+          font.setForegroundColor(0);font.setBackgroundColor(1);font.setCursor(11,66);font.print(names[s]);
+          f.setTextSize(2);f.setCursor(44,410);f.print("avior.local");
+        }
+        // The QR goes on every picture; a saved one gets a white plate so the code stays readable.
         if(qrEnabled&&qr.size){
           const int scale=qrScale(qr.size,220),px=qr.size*scale,x0=760-px,y0=130;
+          if(loaded)f.fillRect(x0-14,y0-14,px+28,px+70,1);
           for(int y=0;y<qr.size;y++)for(int x=0;x<qr.size;x++)if(qr.get(x,y))f.fillRect(x0+x*scale,y0+y*scale,scale,scale,0);
           ScaledText small(f,2);U8G2_FOR_ADAFRUIT_GFX caption;caption.begin(small);caption.setFont(u8g2_font_unifont_t_cyrillic);
           caption.setForegroundColor(0);caption.setBackgroundColor(1);
           const char* line=s==0?"Мы на связи":"Напишите нам";
           caption.setCursor((x0+px/2)/2-caption.getUTF8Width(line)/2,(y0+px+36)/2);caption.print(line);
+        }
+        // Discreet low-battery mark for the owner, bottom right.
+        if(batteryPin>=0&&batteryPercent(batteryMv)<=15){
+          f.fillRect(700,424,64,32,1);f.drawRect(706,430,44,20,0);f.drawRect(707,431,42,18,0);f.fillRect(750,435,4,10,0);f.fillRect(709,433,8,14,3);
         }
       }
       if(ok){
@@ -208,14 +236,35 @@ void requestDisplay(){
   if(millis()<AUTO_RENDER_DELAY_MS||otaBusy||restartAt)return;
   rendering=true;pendingJob=desired;pendingSince=millis();
 }
+bool accessPointWanted(){
+  if(RECOVERY_MODE||ssid.isEmpty()||(int32_t)(apUntil-millis())>0)return true;
+  return !powerSave&&staLostAt&&millis()-staLostAt>=AP_FALLBACK_MS;
+}
+String apName(){return "AviorSign-"+String((uint32_t)ESP.getEfuseMac(),HEX);}
 bool startRadio(){
-  WiFi.mode(RECOVERY_MODE?WIFI_AP:WIFI_AP_STA);WiFi.setHostname("avior");
-  bool apOK=WiFi.softAP(("AviorSign-"+String((uint32_t)ESP.getEfuseMac(),HEX)).c_str(),apPassword.c_str());
+  bool ap=accessPointWanted();
+  WiFi.mode(RECOVERY_MODE?WIFI_AP:ap?WIFI_AP_STA:WIFI_STA);WiFi.setHostname("avior");
+  bool apOK=ap&&WiFi.softAP(apName().c_str(),apPassword.c_str());
   if(RECOVERY_MODE)WiFi.setTxPower(WIFI_POWER_8_5dBm);
   // Wi-Fi recovery deliberately waits for a panel request, even with saved credentials.
   // This preserves an AP-only baseline until the owner starts the next test.
   if(!RECOVERY_MODE&&ssid.length())WiFi.begin(ssid.c_str(),wifiPassword.c_str());
   return apOK;
+}
+void manageAccessPoint(){
+  wifi_mode_t mode=WiFi.getMode();
+  if(RECOVERY_MODE||radioPaused||mode==WIFI_OFF)return;
+  if(WiFi.status()==WL_CONNECTED)staLostAt=0;else if(!staLostAt)staLostAt=millis()|1;
+  bool on=mode==WIFI_AP_STA,want=accessPointWanted();
+  if(want&&!on){bool ok=WiFi.mode(WIFI_AP_STA)&&WiFi.softAP(apName().c_str(),apPassword.c_str());Serial.printf("[radio] access point on: %s\n",ok?"ready":"failed");}
+  else if(!want&&on&&WiFi.softAPgetStationNum()==0){WiFi.enableAP(false);Serial.println("[radio] access point off: office network is up");}
+}
+void pollButton(){
+  if(digitalRead(0)!=LOW){buttonDownAt=0;return;}
+  if(!buttonDownAt){buttonDownAt=millis()|1;return;}
+  if(millis()-buttonDownAt<1000||(int32_t)(apUntil-millis())>0)return;
+  apUntil=millis()+AP_BUTTON_MS;if(powerSave){sessionWake=true;stayAwake(AP_BUTTON_MS);}
+  Serial.println("[radio] button held: access point for 10 minutes");
 }
 void resumeRadio(){
   if(!radioPaused)return;
@@ -234,6 +283,9 @@ void state(){
   d["timeValid"]=time(nullptr)>1700000000;
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["otaPending"]=otaPending;d["qrEnabled"]=qrEnabled;d["qrUrl"]=qrUrl;
+  d["accessPoint"]=WiFi.getMode()==WIFI_AP_STA||WiFi.getMode()==WIFI_AP;d["apName"]=apName();
+  d["batterySave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
+  if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
    if(crmEverOk)c["lastOkSeconds"]=(millis()-crmLastOk)/1000;}
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
@@ -266,6 +318,8 @@ String crmReport(){
   d["uptimeSeconds"]=millis()/1000;d["resetReason"]=resetName(bootReason);d["heap"]=ESP.getFreeHeap();d["otaPending"]=otaPending;
   d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"";d["rssi"]=WiFi.RSSI();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
+  d["powerSave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
+  if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
@@ -295,6 +349,11 @@ bool crmDownload(int slot){
   File f=LittleFS.open("/crm.tmp","w");int written=f?http.writeToStream(&f):-1;if(f)f.close();http.end();
   if(written!=(int)FRAME_BYTES||!LittleFS.rename("/crm.tmp",assetPath(slot))){LittleFS.remove("/crm.tmp");crmError="Картинка из CRM не сохранилась";return false;}
   return true;
+}
+void setPowerSave(bool on){
+  if(on==powerSave)return;
+  powerSave=on;prefs.putBool("power",on);sessionWake=true;stayAwake(60000);
+  Serial.printf("[power] battery mode %s\n",on?"on":"off");
 }
 // Applies what the CRM changed since the last applied seq; returns true when something changed.
 bool crmApply(JsonDocument& r){
@@ -331,6 +390,14 @@ bool crmApply(JsonDocument& r){
     crmMarkApplied(0,statusSeq);
   };
   if(statusSeq<scheduleSeq){applyStatus();applySchedule();}else{applySchedule();applyStatus();}
+  seq=r["power"]["seq"]|0;
+  if(seq>crmApplied[7]){setPowerSave(r["power"]["enabled"]|false);crmMarkApplied(7,seq);}
+  // «Разбудить» from the CRM: stay reachable for 10 minutes from this check on.
+  seq=r["wake"]["seq"]|0;
+  if(seq>crmApplied[8]){
+    if(powerSave){sessionWake=true;stayAwake(REQUEST_AWAKE_MS);wakeReason="crm";}
+    crmMarkApplied(8,seq);Serial.println("[power] awake request from CRM");
+  }
   return changed;
 }
 void crmSync(){
@@ -339,15 +406,61 @@ void crmSync(){
   if(crmRequest(http,tls,plain,crmUrl+"/api/sign/sync.php")<0){crmError="Неверный адрес CRM";return;}
   http.addHeader("Content-Type","application/json");
   int code=http.POST(crmReport());
+  crmDoneThisWake=true; // a failing CRM must not keep a battery-powered sign awake
   if(code!=200){crmError=crmFail(http,code);http.end();Serial.printf("[crm] %s\n",crmError.c_str());return;}
   JsonDocument r;DeserializationError err=deserializeJson(r,http.getString());http.end();
   if(err||!r["ok"].as<bool>()){crmError="Непонятный ответ CRM";return;}
   crmError="";crmLastOk=millis();crmEverOk=true;
   crmIntervalMs=constrain((int)(r["pollSeconds"]|10),5,300)*1000UL;
   if(crmApply(r)){
+    crmDoneThisWake=false; // report the applied change before sleeping
     requestDisplay();
     crmLastTry=millis()-crmIntervalMs+1500; // report the result right away
   }
+}
+// Light sleep until `seconds` pass or the board button (GPIO0, active low) is pressed.
+bool lightSleep(uint32_t seconds){
+  Serial.printf("[power] sleep %us battery_mv=%d\n",(unsigned)seconds,batteryMv);Serial.flush();
+  WiFi.mode(WIFI_OFF);
+  esp_sleep_enable_timer_wakeup((uint64_t)seconds*1000000ULL);
+  gpio_wakeup_enable(GPIO_NUM_0,GPIO_INTR_LOW_LEVEL);esp_sleep_enable_gpio_wakeup();
+  esp_light_sleep_start();
+  bool button=esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_GPIO;
+  gpio_wakeup_disable(GPIO_NUM_0);esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  return button;
+}
+// Seconds until the next wake: POWER_WAKE_MINUTES, or earlier for the next schedule event.
+uint32_t secondsToWake(){
+  uint32_t seconds=POWER_WAKE_MINUTES*60;time_t now=time(nullptr);
+  if(automatic&&now>1700000000){
+    now+=utcOffset*60;tm t;gmtime_r(&now,&t);int m=minutesToNextEvent(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);
+    if(m>0&&(uint32_t)(m*60-t.tm_sec+2)<seconds)seconds=m*60-t.tm_sec+2;
+  }
+  return seconds<20?20:seconds;
+}
+// The radio comes on only when needed: the button, the CRM check, or an hourly time sync
+// that keeps the schedule accurate while the sleep clock drifts.
+void afterWake(bool button,const char* reason){
+  wokeAt=millis();wakeReason=button?"button":reason;sessionWake=button;crmLastTry=0;
+  awakeUntil=millis()+(button?BUTTON_AWAKE_MS:TIMER_AWAKE_MS);
+  bool crmOn=crmEnabled&&crmToken.length();
+  timeSyncWanted=!ntpSyncedAt||millis()-ntpSyncedAt>3600000UL;crmDoneThisWake=!crmOn;
+  if(button||crmOn||timeSyncWanted){startRadio();if(timeSyncWanted)sntp_restart();}
+  sampleBattery();Serial.printf("[power] wake %s radio=%d battery_mv=%d\n",wakeReason,WiFi.getMode()!=WIFI_OFF,batteryMv);
+}
+bool refreshDue(){
+  return confirmed&&desired!=displayed&&displayError.isEmpty()&&!blocksAutoRender(interruptedPhase)&&!(desired==3&&!fsReady);
+}
+// Sleeps once the wake's work is done: a timer wake as soon as the CRM exchange and any
+// refresh finish, a button or CRM wake only after its window.
+void powerSaveStep(){
+  bool window=(int32_t)(millis()-awakeUntil)<0;
+  bool busy=rendering||pendingJob>=0||otaBusy||restartAt||scanActive||radioPaused;
+  bool netPending=!crmDoneThisWake||(timeSyncWanted&&(int32_t)(ntpSyncedAt-wokeAt)<0);
+  if(busy)return;
+  if(window&&(sessionWake||netPending||refreshDue()))return;
+  if(!window&&refreshDue()&&(uint32_t)(millis()-awakeUntil)<120000)return; // the 60 s refresh cooldown
+  afterWake(lightSleep(secondsToWake()),"timer");
 }
 void firmwareUpload(){
   auto& u=web.upload();
@@ -487,6 +600,22 @@ void routes(){
     crmUrl=url;crmEnabled=d["enabled"];crmPrefs.putString("url",crmUrl);crmPrefs.putBool("on",crmEnabled);
     crmError="";crmLastTry=0;state();
   });
+  web.on("/api/v1/power",HTTP_PUT,[]{
+    if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
+    if(!d["batterySave"].is<bool>()){error(400,"Требуется batterySave");return;}
+    setPowerSave(d["batterySave"]);state();
+  });
+  web.on("/api/v1/awake",HTTP_POST,[]{
+    if(!auth())return;stayAwake(REQUEST_AWAKE_MS);state();
+  });
+  // Measures the board's sleep current: radio off and light sleep for the given time,
+  // as in battery mode; the board button ends it early.
+  web.on("/api/v1/sleeptest",HTTP_POST,[]{
+    if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;int sec=d["seconds"]|0;
+    if(sec<30||sec>600){error(400,"Длительность от 30 до 600 секунд");return;}
+    if(rendering||otaBusy){error(409,"Дождитесь окончания обновления");return;}
+    sleepTestSeconds=sec;sleepTestAt=millis()+1500;state();
+  });
   web.on("/api/v1/qr",HTTP_GET,[]{
     if(!auth())return;JsonDocument d;d["enabled"]=qrEnabled;d["url"]=qrUrl;d["size"]=qr.size;
     auto rows=d["rows"].to<JsonArray>();
@@ -550,10 +679,13 @@ void setup(){
   }
   Serial.println("[boot] phase=wifi");Serial.flush();
   if(!RECOVERY_MODE){ssid=prefs.getString("ssid","");wifiPassword=prefs.getString("wifi","");}
+  // After power-on or reset the panel stays reachable for a while even in battery mode.
+  powerSave=!RECOVERY_MODE&&prefs.getBool("power",false);sessionWake=true;awakeUntil=millis()+BUTTON_AWAKE_MS;
+  pinMode(0,INPUT_PULLUP); // board button: BOOT strap at reset, setup button afterwards
   bool apOK=startRadio();
   Serial.printf("[boot] access_point=%s\n",apOK?"ready":"failed");
   if(!RECOVERY_MODE){
-    configTime(0,0,"pool.ntp.org","time.google.com");MDNS.begin("avior");MDNS.addService("http","tcp",80);
+    configTime(0,0,"pool.ntp.org","time.google.com");sntp_set_time_sync_notification_cb(onTimeSync);MDNS.begin("avior");MDNS.addService("http","tcp",80);
   }
   Serial.printf("\nAviorSign setup\nAP password: %s\nAPI token: %s\nOpen http://192.168.4.1\n",apPassword.c_str(),token.c_str());
   sampleBattery();routes();Serial.println("[boot] ready; health log every 5 seconds");
@@ -562,15 +694,23 @@ void loop(){
   web.handleClient();Result r;
   if(otaPending&&millis()>=OTA_CONFIRM_MS){esp_ota_mark_app_valid_cancel_rollback();otaPending=false;Serial.println("[ota] new firmware confirmed");}
   if(restartAt&&(int32_t)(millis()-restartAt)>=0){Serial.flush();ESP.restart();}
+  if(sleepTestAt&&(int32_t)(millis()-sleepTestAt)>=0){
+    sleepTestAt=0;sampleBattery();bool button=lightSleep(sleepTestSeconds);
+    startRadio();sampleBattery();
+    Serial.printf("[power] sleep test done%s battery_mv=%d\n",button?" (button)":"",batteryMv);
+  }
+  pollButton();
+  if(powerSave&&!RECOVERY_MODE)powerSaveStep();
   if(scanActive&&millis()-scanStarted>30000&&WiFi.scanComplete()!=WIFI_SCAN_RUNNING){WiFi.scanDelete();scanActive=false;}
   if(pendingJob>=0&&millis()-pendingSince>=RADIO_OFF_GRACE_MS){
     int s=pendingJob;pendingJob=-1;
-    if(RADIO_OFF_DURING_REFRESH){Serial.println("[radio] off for refresh");WiFi.scanDelete();scanActive=false;WiFi.mode(WIFI_OFF);radioPaused=true;}
+    // A battery-mode wake may have left the radio off on purpose; then it stays off afterwards.
+    if(RADIO_OFF_DURING_REFRESH&&WiFi.getMode()!=WIFI_OFF){Serial.println("[radio] off for refresh");WiFi.scanDelete();scanActive=false;WiFi.mode(WIFI_OFF);radioPaused=true;}
     if(xQueueSend(jobs,&s,0)!=pdTRUE){rendering=false;resumeRadio();}
   }
   if(results&&xQueueReceive(results,&r,0)==pdTRUE){rendering=false;lastRefresh=millis();resumeRadio();if(r.ok){displayed=r.status;displayError="";clearRenderBlock();}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
   if(millis()-lastTick>1000){
-    lastTick=millis();time_t now=time(nullptr);
+    lastTick=millis();manageAccessPoint();time_t now=time(nullptr);
     if(automatic&&now>1700000000){source="schedule";now+=utcOffset*60;tm t;gmtime_r(&now,&t);int s=scheduledStatus(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);if(s>=0&&desired!=s){desired=s;displayError="";}}
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }

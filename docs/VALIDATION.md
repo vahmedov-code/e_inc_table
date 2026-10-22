@@ -2,6 +2,14 @@
 
 ## Update 0.3.0: firmware over Wi-Fi and QR code
 
+### Battery mode, access point, QR everywhere (same version)
+
+- Light sleep rather than deep sleep: the only button is GPIO0, a boot strap, and a deep-sleep wake while it is held is reported to start the ROM download mode. Light sleep keeps RAM, needs no reboot and wakes on GPIO0 low.
+- Wake budget (estimate, not measured): sleep about 24 mAh/day if the board draws ~1 mA asleep, CRM checks every 15 min about 8–12 mAh/day, refreshes 1–2 mAh/day, so roughly 3 months on 3700 mAh. The board's own sleep current is unknown; `POST /sleeptest` exists to measure it.
+- `minutesToNextEvent` (compile-time tests in `src/schedule_checks.cpp`) times the wake for the next schedule event; an hourly SNTP restart corrects the sleep clock.
+- Access point only when needed, per the owner's request; STA-only also lets Wi-Fi use its default modem sleep.
+- Checked: all three environments compile, schedule asserts, UI test (power controls, sleep test, QR overlay shown in previews but absent from uploaded frames). Not run on the board: sleep/wake, real sleep current, button wake, AP switching.
+
 ### Avior CRM link (same version)
 
 The CRM (`vahmedov-code/cms_avior`, PHP on cms.avior.moscow) cannot reach the sign behind the office NAT, so the sign polls it. CRM side: module «Вывеска на двери» under «Инструменты» with migration `2026_10_22_door_signs.sql`, `api/sign/sync.php` and `api/sign/asset.php`. Each CRM change gets a sequence number; the sign keeps the last applied number per item in NVS namespace `avior-crm` and applies only newer ones, status and schedule in CRM order. The CRM module was exercised end to end against a local MariaDB with the CRM's schema and PHP 8.3 (pairing, token auth via both headers, status, picture upload/download byte-for-byte, schedule and QR validation, CSRF, roles, missing migration, phone layout). The firmware client compiles; its exchange with the real CRM, TLS against the production certificate (assumed Let's Encrypt) and heap headroom during TLS are not yet run on the board. Firmware size is 84 % of the OTA slot after adding TLS.

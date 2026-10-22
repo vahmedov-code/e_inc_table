@@ -8,7 +8,7 @@ const deps=createRequire(resolve(__dirname,'../.pio/ui-tests/package.json'));
 const {JSDOM,VirtualConsole}=deps('jsdom');
 const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
-const device={crm:{enabled:false,url:'https://cms.avior.moscow',configured:false,error:''},version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
+const device={batterySave:false,wakeMinutes:15,wakeReason:'boot',accessPoint:false,apName:'AviorSign-1a2b',crm:{enabled:false,url:'https://cms.avior.moscow',configured:false,error:''},version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
 let scanMode='ok',scanPolls=0;
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
@@ -30,6 +30,7 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
      }
      if(url.includes('/asset?slot=')&&opts.method==='GET')return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0xff).buffer};
      if(url.endsWith('/qr'))return {ok:true,status:200,json:async()=>device.qrEnabled?{enabled:true,size:3,rows:['101','010','101']}:{enabled:false,size:3,rows:['101','010','101']}};
+     if(url.endsWith('/power'))Object.assign(device,{batterySave:data.batterySave,awakeSeconds:60});
      if(url.endsWith('/crm'))device.crm={enabled:data.enabled,url:data.url,configured:device.crm.configured||!!data.token,error:'',lastOkSeconds:data.enabled?3:undefined};
      if(url.endsWith('/settings'))Object.assign(device,{qrEnabled:data.qrEnabled,qrUrl:data.qrUrl});
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
@@ -77,6 +78,10 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.equal(d.getElementById('crmToken').value,'','token field cleared after save');assert.match(d.getElementById('crmStatus').textContent,/На связи с CRM/);
  await click('saveCrm');assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/crm')).opts.body).token,undefined,'empty field keeps the stored token');
  device.crm.error='CRM ответила 401: Неверный токен';await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/401/);
+ assert.match(d.getElementById('powerStatus').textContent,/Экономия выключена/);assert.match(d.getElementById('powerStatus').textContent,/AviorSign-1a2b: выключена/);
+ d.getElementById('batterySave').checked=true;await click('savePower');await tick();assert.equal(device.batterySave,true);assert.match(d.getElementById('powerStatus').textContent,/уснёт через 60 с/);
+ await click('stayAwake');assert(requests.some(r=>r.url.endsWith('/awake')&&r.opts.method==='POST'));
+ await click('sleepTest');assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/sleeptest')).opts.body).seconds,180);
  d.querySelector('[data-status="open"]').click();await tick();
  assert.match(d.getElementById('clockState').textContent,/МСК/,'clock shown in schedule time zone, not UTC');
  assert.match(d.getElementById('clockState').textContent,/16:00/,'1792587600 is 16:00 Moscow time');
@@ -84,7 +89,9 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.equal(d.getElementById('saveImage').disabled,true,'nothing to save before a new picture');
  await click('makeTemplate');assert.equal(d.getElementById('saveImage').disabled,false);
  await click('saveImage');const upload=requests.findLast(r=>r.url.includes('/assets?slot=open'));
- assert(upload,'template saved for the selected status');assert.equal((await upload.opts.body.get('file').arrayBuffer()).byteLength,96000);
+ assert(upload,'template saved for the selected status');const sent=new Uint8Array(await upload.opts.body.get('file').arrayBuffer());assert.equal(sent.byteLength,96000);
+ assert.equal((sent[135*200+136]>>4)&3,1,'the QR overlay of the preview is not baked into the uploaded picture');
+ assert.deepEqual(Array.from(w.eval('ctx').getImageData(545,135,1,1).data.slice(0,3)),[0,0,0],'preview shows the QR over a saved picture');
  assert.equal(d.querySelector('[data-kind="open"]').textContent,'своя картинка');
  const fileInput=d.getElementById('imageFile');Object.defineProperty(fileInput,'files',{configurable:true,value:[{type:'image/png',size:256}]});
  d.querySelector('[data-status="soon"]').click();fileInput.dispatchEvent(new w.Event('change'));await tick();

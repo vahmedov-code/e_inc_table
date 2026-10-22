@@ -23,6 +23,14 @@ Version 0.3.0:
 - `GET /qr` returns `{enabled,url,size,rows}`: the module matrix the firmware draws (rows of `0`/`1`), so clients can preview the exact code.
 - `PUT /crm {"enabled":true,"url":"https://cms.avior.moscow","token":"…"}` connects the sign to Avior CRM (`token` optional: omitted keeps the stored one; changing URL or token resets the applied sequence numbers). State reports `crm {enabled,url,configured,error,lastOkSeconds}`; the token is never returned. While enabled, the sign posts its state to `<url>/api/sign/sync.php` about every 10 s (HTTPS verified against ISRG Root X1/X2, only with valid time, outside refreshes and uploads, with ≥45 KB free heap) and applies every CRM item whose `seq` is newer than the last applied one: status (like a manual `POST /status`), schedule, QR settings, pictures (downloaded from `<url>/api/sign/asset.php?slot=`). Local changes stay until the CRM changes the same item again.
 
+Later in 0.3.0 (battery mode and access point):
+
+- `PUT /power {"batterySave":true}` switches battery mode (also settable from the CRM). The sign then light-sleeps with the radio off and wakes at the next schedule event, every 15 minutes for the CRM (radio on only if the CRM is enabled or an hourly time sync is due), or on the board button (3-minute session). A timer wake sleeps again as soon as the CRM exchange and any refresh are done. Only mutating requests extend the awake time; an open panel polling `GET /state` does not. State reports `batterySave`, `wakeMinutes`, `wakeReason` (`boot`, `timer`, `button`, `crm`) and `awakeSeconds`.
+- `POST /awake` keeps the sign awake for 10 minutes. The CRM «Разбудить» does the same at the sign's next check (not instantly: the radio is off while asleep).
+- `POST /sleeptest {"seconds":180}` (30–600) sleeps exactly as battery mode does, to measure the board's sleep current with a meter in the battery lead. The board button ends it early.
+- The access point is for setup only: it runs with no saved network, after the office network has been unreachable for a minute (not in battery mode), or for 10 minutes after holding the board button for one second; it is not dropped while a phone is connected to it. Recovery builds keep it always on. State reports `accessPoint` and `apName`.
+- The QR code is drawn on every picture; saved pictures get a white plate under it. A discreet battery mark appears at the bottom right at 15 % or less.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.

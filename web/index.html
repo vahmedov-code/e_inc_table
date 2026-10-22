@@ -27,14 +27,16 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <div class="picture"><h3>Картинка для «<span id="slotName">Закрыто</span>»</h3>
 <div class="notice" id="storageNotice" hidden>Чтобы сохранять свои картинки, один раз подготовьте хранилище. Будет отформатирован только раздел картинок 0x290000–0x3FFFFF; настройки и прошивка не затрагиваются.<label class="check"><input id="confirmStorage" type="checkbox"><span>Разрешаю отформатировать раздел картинок</span></label><button id="initStorage">Подготовить хранилище</button></div>
 <div class="actions"><label class="filebtn" id="fileLabel">Выбрать файл…<input id="imageFile" type="file" accept="image/png,image/jpeg"></label><button class="primary" id="saveImage">Сохранить картинку</button><button id="resetImage">Вернуть стандартную</button></div>
-<p class="caption">PNG или JPEG вписывается в 800 × 480 с белыми полями и переводится в 4 цвета прямо в браузере. Картинка текущего статуса после сохранения выводится на вывеску сама.</p>
+<p class="caption">PNG или JPEG вписывается в 800 × 480 с белыми полями и переводится в 4 цвета прямо в браузере. QR-код вывеска рисует сама поверх любой картинки справа — оставляйте эту часть свободной. Картинка текущего статуса после сохранения выводится на вывеску сама.</p>
 <details><summary>Текстовый макет вместо файла</summary><div class="form-grid"><label>Название<input id="brand" value="AVIOR" maxlength="24"></label><label>Подпись<input id="subtitle" value="Рады вас видеть" maxlength="48"></label></div><div class="actions"><button id="makeTemplate">Собрать макет</button></div></details>
 </div></section>
 </div>
 <nav class="tabs" role="tablist"><button role="tab" aria-selected="true" aria-controls="tabSchedule" id="tabBtnSchedule">Расписание</button><button role="tab" aria-selected="false" aria-controls="tabWifi">Wi‑Fi</button><button role="tab" aria-selected="false" aria-controls="tabDevice">Устройство</button></nav>
 <section class="card tabpanel" id="tabSchedule" role="tabpanel"><div class="schedule-head"><div><h2>Недельное расписание</h2><p class="muted" style="margin:6px 0 0">Статус держится до следующего события, в том числе ночью и в выходные.</p></div><label>Часовой пояс<select id="timezone"><option value="180">Москва · UTC+3</option><option value="0">UTC</option><option value="60">UTC+1</option><option value="120">UTC+2</option><option value="240">UTC+4</option><option value="300">UTC+5</option></select></label></div><div id="events" class="schedule-list"></div><div class="actions"><button id="addEvent">Добавить событие</button><button class="primary" id="saveSchedule">Сохранить и включить</button><button id="pauseSchedule">Выключить расписание</button></div><div class="clock" id="clockBox"><span id="clockState">Время вывески неизвестно.</span><button id="syncClock">Установить время с этого устройства</button></div></section>
-<section class="card tabpanel" id="tabWifi" role="tabpanel" hidden><form id="wifiForm"><div class="form-grid"><label>Доступные сети 2,4 ГГц<select id="wifiNetworks"><option value="">Сначала нажмите «Найти сети»</option></select></label><button id="scanWifi" type="button" style="align-self:end">Найти сети</button></div><p class="caption" id="wifiScanStatus" role="status">Поиск выполняет сама вывеска. Для скрытой сети введите имя вручную.</p><div class="form-grid"><label>Имя сети<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><div class="actions"><button id="wifiConnect" class="primary">Подключить к сети</button></div><p class="caption">Точка доступа вывески остаётся доступной. Адрес в сети появится вверху страницы.</p></form></section>
-<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">Avior CRM</h3><p class="muted" id="crmStatus">Не подключено.</p><label class="check"><input id="crmEnabled" type="checkbox"><span>Управлять вывеской из CRM: «Инструменты» → «Вывеска на двери». Вывеска сама опрашивает CRM раз в ~10 секунд.</span></label><div class="form-grid"><label>Адрес CRM<input id="crmUrl" type="url" maxlength="120" value="https://cms.avior.moscow"></label><label>Токен вывески из CRM<input id="crmToken" type="password" autocomplete="off" maxlength="128" placeholder="пусто — оставить прежний"></label></div><div class="actions"><button id="saveCrm">Сохранить связь с CRM</button></div>
+<section class="card tabpanel" id="tabWifi" role="tabpanel" hidden><form id="wifiForm"><div class="form-grid"><label>Доступные сети 2,4 ГГц<select id="wifiNetworks"><option value="">Сначала нажмите «Найти сети»</option></select></label><button id="scanWifi" type="button" style="align-self:end">Найти сети</button></div><p class="caption" id="wifiScanStatus" role="status">Поиск выполняет сама вывеска. Для скрытой сети введите имя вручную.</p><div class="form-grid"><label>Имя сети<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><div class="actions"><button id="wifiConnect" class="primary">Подключить к сети</button></div><p class="caption">После подключения своя точка доступа вывески выключится: открывайте панель по адресу в офисной сети, он появится вверху. Точка доступа включается сама, если сеть пропала на минуту, или кнопкой на плате (держать 1 секунду) — на 10 минут.</p></form></section>
+<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">Питание</h3><p class="muted" id="powerStatus">Состояние неизвестно.</p><label class="check"><input id="batterySave" type="checkbox"><span>Экономия заряда — для работы от аккумулятора. Вывеска спит и выходит на связь раз в 15 минут и к событиям расписания. Панель доступна 3 минуты после нажатия кнопки на плате или 10 минут после «Разбудить» в CRM.</span></label><div class="actions"><button id="savePower">Сохранить</button><button id="stayAwake">Не засыпать 10 минут</button></div>
+<details><summary>Замер потребления во сне</summary><div><p class="caption">Отключите USB, включите мультиметр (диапазон мА) в разрыв красного провода аккумулятора и нажмите кнопку: вывеска уснёт на 3 минуты так же, как в режиме экономии. Запишите показание во сне и пришлите — по нему видно, сколько продержится аккумулятор. Кнопка на плате будит раньше.</p><button id="sleepTest">Уснуть на 3 минуты</button></div></details>
+<h3 style="margin-top:20px">Avior CRM</h3><p class="muted" id="crmStatus">Не подключено.</p><label class="check"><input id="crmEnabled" type="checkbox"><span>Управлять вывеской из CRM: «Инструменты» → «Вывеска на двери». Вывеска сама опрашивает CRM раз в ~10 секунд.</span></label><div class="form-grid"><label>Адрес CRM<input id="crmUrl" type="url" maxlength="120" value="https://cms.avior.moscow"></label><label>Токен вывески из CRM<input id="crmToken" type="password" autocomplete="off" maxlength="128" placeholder="пусто — оставить прежний"></label></div><div class="actions"><button id="saveCrm">Сохранить связь с CRM</button></div>
 <h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
 <h3 style="margin-top:20px">Обновление прошивки</h3><p class="muted" id="fwStatus">Версия неизвестна.</p><div class="actions"><label class="filebtn">Выбрать firmware.bin<input id="fwFile" type="file" accept=".bin,application/octet-stream"></label><button class="primary" id="fwUpload">Загрузить и перезапустить</button></div><progress id="fwProgress" max="1" value="0" hidden style="width:100%;margin-top:10px"></progress><p class="caption">Файл из <code>.pio\build\esp32-m075-v3\firmware.bin</code> после сборки. Новая версия первую минуту проверяется: если вывеска за это время перезагрузится, автоматически вернётся прежняя.</p>
 <h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
@@ -45,7 +47,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 const $=id=>document.getElementById(id),labels={open:'Открыто',closed:'Закрыто',soon:'Скоро буду',image:'Своё изображение',unknown:'неизвестно'},slots=['open','closed','soon','image'];
 const canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
 const work=document.createElement('canvas');work.width=800;work.height=480;const wctx=work.getContext('2d',{willReadFrequently:true});
-let qrRows=null,qrKey='',settingsShown=false,crmShown=false;
+let qrRows=null,qrKey='',settingsShown=false,crmShown=false,powerShown=false,draftBytes=null;
 let selected='closed',key=sessionStorage.getItem('aviorKey')||'',state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
 // Saved frame per slot: Uint8Array, null when the device has none, undefined before the first check.
 const assets={};
@@ -63,12 +65,13 @@ function standard(c,s){
  c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle=s==='closed'?'#c41e23':s==='soon'?'#ffd500':'#000';c.fillRect(40,40,720,8);
  c.fillStyle='#000';c.textAlign='left';c.font='700 40px monospace';c.fillText('AVIOR',44,125);
  c.font='600 64px system-ui';c.fillText(labels[s],44,264,(qrRows&&state?.qrEnabled)?470:712);c.font='16px monospace';c.fillText('avior.local',44,425);
- drawQr(c,s);
+ drawQr(c,s,false);
 }
 // Same module matrix and placement as the firmware (GET /qr), so the preview matches the sign.
-function drawQr(c,s){
+function drawQr(c,s,plate){
  if(!qrRows||!state?.qrEnabled)return;
- const n=qrRows.length,scale=Math.floor(220/n),px=n*scale,x0=760-px,y0=130;c.fillStyle='#000';
+ const n=qrRows.length,scale=Math.floor(220/n),px=n*scale,x0=760-px,y0=130;
+ if(plate){c.fillStyle='#fff';c.fillRect(x0-14,y0-14,px+28,px+70);}c.fillStyle='#000';
  qrRows.forEach((row,y)=>{for(let x=0;x<n;x++)if(row[x]==='1')c.fillRect(x0+x*scale,y0+y*scale,scale,scale);});
  c.font='600 26px system-ui';c.textAlign='center';c.fillText(s==='open'?'Мы на связи':'Напишите нам',x0+px/2,y0+px+36);c.textAlign='left';
 }
@@ -80,7 +83,7 @@ function placeholder(c){c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle='
 function textLayout(c,s){
  c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle=s==='closed'?'#c41e23':s==='soon'?'#ffd500':'#000';c.fillRect(42,40,716,9);
  c.fillStyle='#000';c.textAlign='left';c.font='600 30px system-ui';c.fillText($('brand').value||'AVIOR',44,104,710);
- c.font='650 88px system-ui';c.fillText(s==='image'?($('brand').value||'AVIOR'):labels[s],40,268,720);
+ c.font='650 88px system-ui';c.fillText(s==='image'?($('brand').value||'AVIOR'):labels[s],40,268,(qrRows&&state?.qrEnabled)?470:720);
  c.font='26px system-ui';c.fillText($('subtitle').value,44,340,710);c.font='16px system-ui';c.fillText('avior.local',44,430);
 }
 // Near-gray pixels (antialiased text, grayscale photos) map to black or white only;
@@ -97,8 +100,9 @@ function pack(){
 }
 function frameImage(bytes){if(bytes.length!==96000)throw Error('Повреждённый макет');const img=ctx.createImageData(800,480);for(let p=0;p<384000;p++){const c=palette[(bytes[p>>2]>>(6-2*(p%4)))&3];for(let k=0;k<3;k++)img.data[p*4+k]=c[k];img.data[p*4+3]=255;}return img;}
 function unpack(bytes){ctx.putImageData(frameImage(bytes),0,0);}
+// Previews show the QR the sign adds over a saved picture; uploads never contain it.
 function slotPixels(s){
- if(assets[s])return frameImage(assets[s]).data;
+ if(assets[s]){wctx.putImageData(frameImage(assets[s]),0,0);drawQr(wctx,s,true);return wctx.getImageData(0,0,800,480).data;}
  if(s==='image')placeholder(wctx);else standard(wctx,s);
  return wctx.getImageData(0,0,800,480).data;
 }
@@ -119,8 +123,8 @@ function updateButtons(){
  $('makeTemplate').disabled=recovery;
 }
 function showSelected(){
- draft=false;
- if(assets[selected]){unpack(assets[selected]);setSource('Сохранённая картинка');}
+ draft=false;draftBytes=null;
+ if(assets[selected]){unpack(assets[selected]);drawQr(ctx,selected,true);setSource('Сохранённая картинка');}
  else if(selected==='image'){placeholder(ctx);setSource('Картинка ещё не загружена');}
  else{standard(ctx,selected);setSource('Стандартная картинка');}
  updateButtons();
@@ -175,6 +179,12 @@ async function refresh(){
  const k=state.qrEnabled+'|'+state.qrUrl;if(k!==qrKey){qrKey=k;loadQr();}
  $('fwStatus').textContent='Сейчас работает версия '+(state.version||'?')+(state.otaPending?' · новая прошивка проверяется первую минуту; при сбое вернётся прежняя.':'.');
  $('saveQr').disabled=!!state.recovery;$('saveCrm').disabled=!!state.recovery;
+ ['savePower','sleepTest'].forEach(id=>$(id).disabled=!!state.recovery);
+ if(!powerShown&&state.batterySave!==undefined){$('batterySave').checked=!!state.batterySave;powerShown=true;}
+ if(state.batterySave!==undefined){
+  const why={button:'кнопка на плате',timer:'плановая проверка',crm:'«Разбудить» в CRM',boot:'включение'}[state.wakeReason]||state.wakeReason;
+  $('powerStatus').textContent=(state.batterySave?'Экономия включена: проснулась ('+why+'), уснёт через '+(state.awakeSeconds||0)+' с, затем связь раз в '+state.wakeMinutes+' мин.':'Экономия выключена: вывеска всё время на связи (питание от USB).')+' Точка доступа '+state.apName+': '+(state.accessPoint?'включена.':'выключена.');
+ }
  const crm=state.crm;
  if(crm){
   if(!crmShown){$('crmEnabled').checked=!!crm.enabled;$('crmUrl').value=crm.url;crmShown=true;}
@@ -195,7 +205,7 @@ function schedule(enabled){const events=Array.from($('events').children).map(r=>
 async function saveDraft(){
  if(!draft)throw Error('Сначала выберите файл или соберите текстовый макет.');
  if(!state?.storageReady)throw Error('Сначала подготовьте хранилище: блок «Картинка для…» справа.');
- const bytes=pack(),f=new FormData();f.append('file',new Blob([bytes],{type:'application/octet-stream'}),'sign.frame');
+ const bytes=draftBytes,f=new FormData();f.append('file',new Blob([bytes],{type:'application/octet-stream'}),'sign.frame');
  await api('assets?slot='+selected,'POST',f);assets[selected]=bytes;draft=false;setSource('Сохранённая картинка');drawThumb(selected);updateButtons();
 }
 $('loginForm').onsubmit=e=>{e.preventDefault();run(async()=>{key=$('token').value.trim();await refresh();sessionStorage.setItem('aviorKey',key);$('token').value='';await readSchedule();feedback('Вывеска подключена.');});};
@@ -207,12 +217,12 @@ $('publish').onclick=()=>run(async()=>{
 });
 $('saveImage').onclick=()=>run(async()=>{const current=state?.displayed===selected;await saveDraft();await refresh();feedback('Картинка для «'+labels[selected]+'» сохранена.'+(current?' Вывеска обновится сама.':' Чтобы вывести её, нажмите «Показать на вывеске».'));});
 $('resetImage').onclick=()=>run(async()=>{await api('asset?slot='+selected,'DELETE');assets[selected]=null;showSelected();drawThumb(selected);await refresh();feedback(selected==='image'?'Своё изображение удалено.':'Для «'+labels[selected]+'» снова стандартная картинка.');});
-$('makeTemplate').onclick=()=>{textLayout(ctx,selected);unpack(pack());draft=true;setSource('Текстовый макет · не сохранён',true);updateButtons();};
+$('makeTemplate').onclick=()=>{textLayout(ctx,selected);draftBytes=pack();unpack(draftBytes);drawQr(ctx,selected,true);draft=true;setSource('Текстовый макет · не сохранён',true);updateButtons();};
 $('imageFile').onchange=()=>run(async()=>{
  const file=$('imageFile').files[0];if(!file)return;
  if(!['image/png','image/jpeg'].includes(file.type)||file.size>15*1024*1024)throw Error('Выберите PNG или JPEG размером до 15 МБ.');
  const img=await createImageBitmap(file);if(img.width*img.height>40000000){img.close();throw Error('Максимум 40 миллионов пикселей.');}
- ctx.fillStyle='#fff';ctx.fillRect(0,0,800,480);const scale=Math.min(800/img.width,480/img.height),w=img.width*scale,h=img.height*scale;ctx.drawImage(img,(800-w)/2,(480-h)/2,w,h);img.close();unpack(pack());
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,800,480);const scale=Math.min(800/img.width,480/img.height),w=img.width*scale,h=img.height*scale;ctx.drawImage(img,(800-w)/2,(480-h)/2,w,h);img.close();draftBytes=pack();unpack(draftBytes);drawQr(ctx,selected,true);
  draft=true;setSource('Новая картинка · не сохранена',true);updateButtons();feedback('Картинка подготовлена для «'+labels[selected]+'». Проверьте предпросмотр и нажмите «Сохранить картинку».');
 });
 $('addEvent').onclick=()=>{if($('events').children.length>=32){feedback('Максимум 32 события.',true);return;}eventRow();};
@@ -251,6 +261,12 @@ $('saveCrm').onclick=()=>run(async()=>{
  await api('crm','PUT',body);$('crmToken').value='';await refresh();
  feedback(body.enabled?'Связь с CRM сохранена. Через 10–20 секунд вывеска появится в CRM.':'Связь с CRM выключена.');
 });
+$('savePower').onclick=()=>run(async()=>{
+ await api('power','PUT',{batterySave:$('batterySave').checked});await refresh();
+ feedback($('batterySave').checked?'Экономия включена. Через минуту без действий вывеска уснёт; связь — раз в 15 минут.':'Экономия выключена: вывеска всё время на связи.');
+});
+$('stayAwake').onclick=()=>run(async()=>{await api('awake','POST');await refresh();feedback('Вывеска не заснёт ещё 10 минут.');});
+$('sleepTest').onclick=()=>run(async()=>{await api('sleeptest','POST',{seconds:180});feedback('Вывеска засыпает на 3 минуты — смотрите на мультиметр. Панель вернётся сама.',false);});
 $('saveQr').onclick=()=>run(async()=>{
  const url=$('qrUrl').value.trim();if(!/^https?:\/\/\S+$/.test(url))throw Error('Укажите полную ссылку, начиная с https');
  await api('settings','PUT',{qrEnabled:$('qrEnabled').checked,qrUrl:url});await refresh();await loadQr();
