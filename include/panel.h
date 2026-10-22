@@ -18,10 +18,11 @@ public:
 
 class ScaledText : public Adafruit_GFX {
   Frame& target;
+  int scale;
 public:
-  explicit ScaledText(Frame& frame) : Adafruit_GFX(200,120),target(frame) {}
+  ScaledText(Frame& frame,int factor) : Adafruit_GFX(800/factor,480/factor),target(frame),scale(factor) {}
   void drawPixel(int16_t x,int16_t y,uint16_t color) override {
-    target.fillRect(x*4,y*4,4,4,color);
+    target.fillRect(x*scale,y*scale,scale,scale,color);
   }
 };
 

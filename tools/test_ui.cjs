@@ -8,7 +8,7 @@ const deps=createRequire(resolve(__dirname,'../.pio/ui-tests/package.json'));
 const {JSDOM,VirtualConsole}=deps('jsdom');
 const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
-const device={version:'0.2.0',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
+const device={version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
 let scanMode='ok',scanPolls=0;
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
@@ -29,6 +29,8 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
        return {ok:true,status:scanning?202:200,json:async()=>({scanning,networks:scanMode==='empty'?[]:[{ssid:'Office-Test',rssi:-42,secure:true},{ssid:'<img src=x onerror=alert(1)>',rssi:-60,secure:false}]})};
      }
      if(url.includes('/asset?slot=')&&opts.method==='GET')return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0xff).buffer};
+     if(url.endsWith('/qr'))return {ok:true,status:200,json:async()=>device.qrEnabled?{enabled:true,size:3,rows:['101','010','101']}:{enabled:false,size:3,rows:['101','010','101']}};
+     if(url.endsWith('/settings'))Object.assign(device,{qrEnabled:data.qrEnabled,qrUrl:data.qrUrl});
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
      if(url.endsWith('/schedule')&&opts.method==='PUT'){schedule=data;device.automatic=data.enabled;}
      const value=url.endsWith('/schedule')?schedule:device;
@@ -57,7 +59,18 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
    w.unpack(b);assert.equal(w.pack()[0],byte,'round trip palette');
  }
  for(const [css,byte]of [['#8a8a8a',0x55],['#707070',0]]){w.eval(`ctx.fillStyle='${css}';ctx.fillRect(0,0,800,480);`);assert.equal(w.pack()[0],byte,`gray ${css} never becomes red`);}
- assert.equal(d.getElementById('version').textContent,'AviorSign · 0.2.0');
+ assert.equal(d.getElementById('version').textContent,'AviorSign · 0.3.0');
+ const px=()=>Array.from(w.eval('ctx').getImageData(545,135,1,1).data.slice(0,3));
+ d.querySelector('[data-status="closed"]').click();await tick();assert.deepEqual(px(),[0,0,0],'QR module drawn in the built-in preview');
+ assert.equal(d.getElementById('qrUrl').value,'https://avior.moscow/na-svyazi/');
+ d.getElementById('qrEnabled').checked=false;await click('saveQr');await tick();assert.equal(device.qrEnabled,false);
+ d.querySelector('[data-status="closed"]').click();await tick();assert.deepEqual(px(),[255,255,255],'no QR when disabled');
+ d.getElementById('qrUrl').value='avior.moscow';d.getElementById('qrEnabled').checked=true;const settingsCalls=requests.filter(r=>r.url.endsWith('/settings')).length;await click('saveQr');
+ assert.equal(requests.filter(r=>r.url.endsWith('/settings')).length,settingsCalls,'invalid QR link never sent');
+ d.getElementById('qrUrl').value='https://avior.moscow/na-svyazi/';await click('saveQr');await tick();assert.equal(device.qrEnabled,true);
+ const fw=d.getElementById('fwFile');Object.defineProperty(fw,'files',{configurable:true,value:[new w.File([new Uint8Array(200000)],'firmware.bin')]});
+ await click('fwUpload');await tick();assert.match(d.getElementById('feedback').textContent,/не файл прошивки/,'non-ESP32 image rejected in the browser');
+ d.querySelector('[data-status="open"]').click();await tick();
  assert.match(d.getElementById('clockState').textContent,/МСК/,'clock shown in schedule time zone, not UTC');
  assert.match(d.getElementById('clockState').textContent,/16:00/,'1792587600 is 16:00 Moscow time');
  assert.match(d.getElementById('clockState').textContent,/расходится/,'drift against this device is reported');

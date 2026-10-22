@@ -8,6 +8,9 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
+#include <esp_ota_ops.h>
+#include <Update.h>
+#include <qrcode.h>
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -21,6 +24,7 @@
 #include "schedule.h"
 #include "schedule_json.h"
 #include "battery.h"
+#include "qr_matrix.h"
 #include "web_ui.h"
 
 WebServer web(80);
@@ -49,6 +53,24 @@ constexpr uint32_t AUTO_RENDER_DELAY_MS=20000;
 constexpr bool RADIO_OFF_DURING_REFRESH=true;
 constexpr uint32_t RADIO_OFF_GRACE_MS=1500;
 int pendingJob=-1;uint32_t pendingSince=0;bool radioPaused=false;
+// A freshly updated image stays pending until it has run for OTA_CONFIRM_MS; a reset
+// before that makes the bootloader return to the previous image.
+extern "C" bool verifyRollbackLater(){return true;}
+constexpr uint32_t OTA_CONFIRM_MS=60000;
+bool otaPending=false,otaOK=false;std::atomic<bool> otaBusy(false);String otaError;size_t otaBytes=0;uint32_t restartAt=0;
+const char* DEFAULT_QR_URL="https://avior.moscow/na-svyazi/";
+bool qrEnabled=true;String qrUrl=DEFAULT_QR_URL;QrMatrix qr;
+QrMatrix* qrOut=nullptr;
+void qrCapture(esp_qrcode_handle_t h){
+  int n=esp_qrcode_get_size(h);if(!qrOut||n<=0||n>QR_MAX_SIZE)return;
+  qrOut->size=n;for(int y=0;y<n;y++)for(int x=0;x<n;x++)if(esp_qrcode_get_module(h,x,y))qrOut->set(x,y);
+}
+// Runs in the loop task only and never during a refresh, so the worker reads a stable matrix.
+bool makeQr(const String& text){
+  QrMatrix m;qrOut=&m;esp_qrcode_config_t c{qrCapture,10,ESP_QRCODE_ECC_MED};
+  bool ok=esp_qrcode_generate(&c,text.c_str())==ESP_OK&&m.size>0;qrOut=nullptr;
+  if(ok)qr=m;return ok;
+}
 int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
 // Skipped during a refresh: the panel load would read as a discharged battery.
 void sampleBattery(){
@@ -144,9 +166,17 @@ void worker(void*) {
         memset(data,0x55,FRAME_BYTES);Frame f(data);
         f.fillRect(40,40,720,8,s==1?3:s==2?2:0);
         f.setTextColor(0);f.setTextSize(5);f.setCursor(44,85);f.print("AVIOR");
-        ScaledText text(f);U8G2_FOR_ADAFRUIT_GFX font;font.begin(text);font.setFont(u8g2_font_unifont_t_cyrillic);
+        ScaledText text(f,4);U8G2_FOR_ADAFRUIT_GFX font;font.begin(text);font.setFont(u8g2_font_unifont_t_cyrillic);
         font.setForegroundColor(0);font.setBackgroundColor(1);font.setCursor(11,66);font.print(names[s]);
         f.setTextSize(2);f.setCursor(44,410);f.print("avior.local");
+        if(qrEnabled&&qr.size){
+          const int scale=qrScale(qr.size,220),px=qr.size*scale,x0=760-px,y0=130;
+          for(int y=0;y<qr.size;y++)for(int x=0;x<qr.size;x++)if(qr.get(x,y))f.fillRect(x0+x*scale,y0+y*scale,scale,scale,0);
+          ScaledText small(f,2);U8G2_FOR_ADAFRUIT_GFX caption;caption.begin(small);caption.setFont(u8g2_font_unifont_t_cyrillic);
+          caption.setForegroundColor(0);caption.setBackgroundColor(1);
+          const char* line=s==0?"Мы на связи":"Напишите нам";
+          caption.setCursor((x0+px/2)/2-caption.getUTF8Width(line)/2,(y0+px+36)/2);caption.print(line);
+        }
       }
       if(ok){
         Serial.printf("[display] start status=%s\n",keys[s]);renderPhase(PHASE_START);
@@ -163,7 +193,7 @@ void requestDisplay(){
   if(RECOVERY_MODE)return;
   if(!confirmed || rendering || !fsReady && desired==3 || desired==displayed)return;
   if(lastRefresh && millis()-lastRefresh<60000)return;
-  if(millis()<AUTO_RENDER_DELAY_MS)return;
+  if(millis()<AUTO_RENDER_DELAY_MS||otaBusy||restartAt)return;
   rendering=true;pendingJob=desired;pendingSince=millis();
 }
 bool startRadio(){
@@ -191,6 +221,7 @@ void state(){
   d["wifiModeError"]=wifi.modeError;d["wifiAssociationError"]=wifi.associationError;d["wifiIpError"]=wifi.ipError;
   d["timeValid"]=time(nullptr)>1700000000;
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
+  d["otaPending"]=otaPending;d["qrEnabled"]=qrEnabled;d["qrUrl"]=qrUrl;
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;}
@@ -211,6 +242,25 @@ void upload(){
   }else if(u.status==UPLOAD_FILE_END){
     if(uploadFile)uploadFile.close();uploadOK=uploadOK&&uploadBytes==FRAME_BYTES;
   }else if(u.status==UPLOAD_FILE_ABORTED){if(uploadFile)uploadFile.close();uploadOK=false;if(fsReady)LittleFS.remove("/upload.tmp");}
+}
+void firmwareUpload(){
+  auto& u=web.upload();
+  if(u.status==UPLOAD_FILE_START){
+    otaOK=false;otaError="";otaBytes=0;
+    if(!authorized()){otaError="Требуется ключ доступа";return;}
+    if(rendering||radioPaused){otaError="Дождитесь окончания обновления экрана";return;}
+    if(!Update.begin(UPDATE_SIZE_UNKNOWN,U_FLASH)){otaError=String("Не удалось начать обновление: ")+Update.errorString();return;}
+    otaBusy=true;otaOK=true;Serial.println("[ota] upload started");
+  }else if(u.status==UPLOAD_FILE_WRITE){
+    if(!otaOK)return;
+    if(otaBytes==0&&u.currentSize&&u.buf[0]!=0xE9){otaError="Это не файл прошивки ESP32 (нужен firmware.bin)";otaOK=false;Update.abort();return;}
+    if(Update.write(u.buf,u.currentSize)!=u.currentSize){otaError=String("Ошибка записи: ")+Update.errorString();otaOK=false;Update.abort();return;}
+    otaBytes+=u.currentSize;
+  }else if(u.status==UPLOAD_FILE_END){
+    if(otaOK&&!Update.end(true)){otaError=String("Образ не прошёл проверку: ")+Update.errorString();otaOK=false;}
+  }else if(u.status==UPLOAD_FILE_ABORTED){
+    if(otaOK)Update.abort();otaOK=false;otaError="Загрузка прервана";
+  }
 }
 void routes(){
   const char* headers[]={"Authorization"};web.collectHeaders(headers,1);
@@ -298,6 +348,32 @@ void routes(){
     File f=LittleFS.open(assetPath(s),"r");if(!f){error(404,"Нет изображения");return;}
     web.streamFile(f,"application/octet-stream");f.close();
   });
+  // Firmware update is allowed in recovery too: it is how a recovery build is left without USB.
+  web.on("/api/v1/firmware",HTTP_POST,[]{
+    if(!otaOK)otaBusy=false;
+    if(!auth())return;
+    if(!otaOK){error(400,otaError.length()?otaError.c_str():"Нужен файл firmware.bin");return;}
+    Serial.printf("[ota] %u bytes written; restarting into the new image\n",(unsigned)otaBytes);
+    JsonDocument d;d["accepted"]=true;d["bytes"]=otaBytes;reply(200,d);restartAt=millis()+1500;
+  },firmwareUpload);
+  web.on("/api/v1/settings",HTTP_PUT,[]{
+    if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
+    if(rendering){error(409,"Дождитесь окончания обновления экрана");return;}
+    if(!d["qrEnabled"].is<bool>()||!d["qrUrl"].is<const char*>()){error(400,"Требуются qrEnabled и qrUrl");return;}
+    String url=d["qrUrl"].as<const char*>();url.trim();
+    if(url.length()>160||!(url.startsWith("https://")||url.startsWith("http://"))){error(400,"Ссылка должна начинаться с https:// и быть не длиннее 160 символов");return;}
+    if(!makeQr(url)){error(400,"Не удалось построить QR-код для этой ссылки");return;}
+    qrEnabled=d["qrEnabled"];qrUrl=url;prefs.putBool("qrOn",qrEnabled);prefs.putString("qrUrl",qrUrl);
+    // Built-in frames carry the QR, so the current one is redrawn; saved pictures are not.
+    if(desired<3&&!(fsReady&&LittleFS.exists(assetPath(desired))))displayed=-1;
+    requestDisplay();state();
+  });
+  web.on("/api/v1/qr",HTTP_GET,[]{
+    if(!auth())return;JsonDocument d;d["enabled"]=qrEnabled;d["url"]=qrUrl;d["size"]=qr.size;
+    auto rows=d["rows"].to<JsonArray>();
+    for(int y=0;y<qr.size;y++){String row;row.reserve(qr.size);for(int x=0;x<qr.size;x++)row+=qr.get(x,y)?'1':'0';rows.add(row);}
+    reply(200,d);
+  });
   web.onNotFound([]{error(404,"Маршрут не найден");});web.begin();
 }
 void setup(){
@@ -307,6 +383,13 @@ void setup(){
   token=prefs.getString("token","");apPassword=prefs.getString("ap","");
   if(token.isEmpty()){token=randomHex(24);prefs.putString("token",token);}
   if(apPassword.isEmpty()){apPassword=randomHex(8);prefs.putString("ap",apPassword);}
+  {
+    const esp_partition_t* running=esp_ota_get_running_partition();esp_ota_img_states_t ota;
+    otaPending=running&&esp_ota_get_state_partition(running,&ota)==ESP_OK&&ota==ESP_OTA_IMG_PENDING_VERIFY;
+    Serial.printf("[boot] app=%s ota_pending=%d\n",running?running->label:"?",otaPending);
+  }
+  qrEnabled=prefs.getBool("qrOn",true);qrUrl=prefs.getString("qrUrl",DEFAULT_QR_URL);
+  if(!makeQr(qrUrl)){qrUrl=DEFAULT_QR_URL;makeQr(qrUrl);}
   confirmed=!RECOVERY_MODE&&prefs.getBool("hardware",false);desired=constrain(prefs.getInt("desired",1),0,3);
   JsonDocument d;String stored=prefs.getString("schedule","");int n,offset;
   if(!deserializeJson(d,stored)&&parseSchedule(d,events,n,offset)){eventCount=n;utcOffset=offset;automatic=d["enabled"];}
@@ -355,6 +438,8 @@ void setup(){
 }
 void loop(){
   web.handleClient();Result r;
+  if(otaPending&&millis()>=OTA_CONFIRM_MS){esp_ota_mark_app_valid_cancel_rollback();otaPending=false;Serial.println("[ota] new firmware confirmed");}
+  if(restartAt&&(int32_t)(millis()-restartAt)>=0){Serial.flush();ESP.restart();}
   if(scanActive&&millis()-scanStarted>30000&&WiFi.scanComplete()!=WIFI_SCAN_RUNNING){WiFi.scanDelete();scanActive=false;}
   if(pendingJob>=0&&millis()-pendingSince>=RADIO_OFF_GRACE_MS){
     int s=pendingJob;pendingJob=-1;

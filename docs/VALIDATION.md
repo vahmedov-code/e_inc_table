@@ -1,5 +1,11 @@
 # Validation — 2026-10-21
 
+## Update 0.3.0: firmware over Wi-Fi and QR code
+
+- OTA: `POST /firmware` streams into the inactive slot with the Arduino `Update` class and restarts. Rollback relies on the framework's `CONFIG_APP_ROLLBACK_ENABLE` (set in Arduino-ESP32 2.0.17's sdkconfig and its bootloader): `verifyRollbackLater()` is overridden to return true (checked in the linked ELF), so the image is only marked valid after 60 s of uptime. The partition table already had `otadata`, `ota_0`, `ota_1`; it is unchanged. `tools/ota.ps1` builds and uploads with curl and waits for the restart. The first install of 0.3.0 still goes over USB because 0.2.1 has no endpoint.
+- QR: generated on the device with ESP-IDF's bundled `qrcode` component (no new dependency), ECC M, up to version 10. Drawn on the three built-in frames in a 220 px square at the right (version 3, 7 px modules for the default link), with the caption «Мы на связи» / «Напишите нам». The panel draws its preview from `GET /qr`, the same matrix. Default link https://avior.moscow/na-svyazi/, editable and switchable under «Устройство».
+- Checked: all three environments compile; UI test covers QR in the preview, disabling it, refusing an invalid link, and rejecting a non-ESP32 file before upload. Not run on the board: the upload itself, rollback, QR scanning from the panel.
+
 ## Update 0.2.1: schedule fix and battery estimate
 
 Owner report: saving a valid one-event schedule (Thursday 21:00, closed) failed with "Проверьте дни, время, статусы…". Cause: `parseSchedule` takes a `const JsonDocument&`, and in ArduinoJson 7 `is<JsonArray>()` on a const variant is always false, so every schedule was rejected and the stored one was never loaded at boot. Confirmed on the host against the pinned ArduinoJson. The parser now lives in `include/schedule_json.h`, uses `is<JsonArrayConst>()`, and `tools/test_schedule.cpp` runs it with the real library (valid schedule accepted; empty enabled, duplicate, `image`, out-of-range day, minute and offset, non-array rejected). The test fails on the old check. CI runs it.

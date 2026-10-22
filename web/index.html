@@ -34,7 +34,9 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <nav class="tabs" role="tablist"><button role="tab" aria-selected="true" aria-controls="tabSchedule" id="tabBtnSchedule">Расписание</button><button role="tab" aria-selected="false" aria-controls="tabWifi">Wi‑Fi</button><button role="tab" aria-selected="false" aria-controls="tabDevice">Устройство</button></nav>
 <section class="card tabpanel" id="tabSchedule" role="tabpanel"><div class="schedule-head"><div><h2>Недельное расписание</h2><p class="muted" style="margin:6px 0 0">Статус держится до следующего события, в том числе ночью и в выходные.</p></div><label>Часовой пояс<select id="timezone"><option value="180">Москва · UTC+3</option><option value="0">UTC</option><option value="60">UTC+1</option><option value="120">UTC+2</option><option value="240">UTC+4</option><option value="300">UTC+5</option></select></label></div><div id="events" class="schedule-list"></div><div class="actions"><button id="addEvent">Добавить событие</button><button class="primary" id="saveSchedule">Сохранить и включить</button><button id="pauseSchedule">Выключить расписание</button></div><div class="clock" id="clockBox"><span id="clockState">Время вывески неизвестно.</span><button id="syncClock">Установить время с этого устройства</button></div></section>
 <section class="card tabpanel" id="tabWifi" role="tabpanel" hidden><form id="wifiForm"><div class="form-grid"><label>Доступные сети 2,4 ГГц<select id="wifiNetworks"><option value="">Сначала нажмите «Найти сети»</option></select></label><button id="scanWifi" type="button" style="align-self:end">Найти сети</button></div><p class="caption" id="wifiScanStatus" role="status">Поиск выполняет сама вывеска. Для скрытой сети введите имя вручную.</p><div class="form-grid"><label>Имя сети<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><div class="actions"><button id="wifiConnect" class="primary">Подключить к сети</button></div><p class="caption">Точка доступа вывески остаётся доступной. Адрес в сети появится вверху страницы.</p></form></section>
-<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
+<section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
+<h3 style="margin-top:20px">Обновление прошивки</h3><p class="muted" id="fwStatus">Версия неизвестна.</p><div class="actions"><label class="filebtn">Выбрать firmware.bin<input id="fwFile" type="file" accept=".bin,application/octet-stream"></label><button class="primary" id="fwUpload">Загрузить и перезапустить</button></div><progress id="fwProgress" max="1" value="0" hidden style="width:100%;margin-top:10px"></progress><p class="caption">Файл из <code>.pio\build\esp32-m075-v3\firmware.bin</code> после сборки. Новая версия первую минуту проверяется: если вывеска за это время перезагрузится, автоматически вернётся прежняя.</p>
+<h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
 </main><footer><span id="version">AviorSign</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
 <div id="feedback" class="toast" role="status" aria-live="polite" hidden></div>
 <script>
@@ -42,6 +44,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 const $=id=>document.getElementById(id),labels={open:'Открыто',closed:'Закрыто',soon:'Скоро буду',image:'Своё изображение',unknown:'неизвестно'},slots=['open','closed','soon','image'];
 const canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
 const work=document.createElement('canvas');work.width=800;work.height=480;const wctx=work.getContext('2d',{willReadFrequently:true});
+let qrRows=null,qrKey='',settingsShown=false;
 let selected='closed',key=sessionStorage.getItem('aviorKey')||'',state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
 // Saved frame per slot: Uint8Array, null when the device has none, undefined before the first check.
 const assets={};
@@ -58,7 +61,19 @@ async function run(fn){if(operation)return;operation=true;try{await fn();}catch(
 function standard(c,s){
  c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle=s==='closed'?'#c41e23':s==='soon'?'#ffd500':'#000';c.fillRect(40,40,720,8);
  c.fillStyle='#000';c.textAlign='left';c.font='700 40px monospace';c.fillText('AVIOR',44,125);
- c.font='600 64px system-ui';c.fillText(labels[s],44,264,712);c.font='16px monospace';c.fillText('avior.local',44,425);
+ c.font='600 64px system-ui';c.fillText(labels[s],44,264,(qrRows&&state?.qrEnabled)?470:712);c.font='16px monospace';c.fillText('avior.local',44,425);
+ drawQr(c,s);
+}
+// Same module matrix and placement as the firmware (GET /qr), so the preview matches the sign.
+function drawQr(c,s){
+ if(!qrRows||!state?.qrEnabled)return;
+ const n=qrRows.length,scale=Math.floor(220/n),px=n*scale,x0=760-px,y0=130;c.fillStyle='#000';
+ qrRows.forEach((row,y)=>{for(let x=0;x<n;x++)if(row[x]==='1')c.fillRect(x0+x*scale,y0+y*scale,scale,scale);});
+ c.font='600 26px system-ui';c.textAlign='center';c.fillText(s==='open'?'Мы на связи':'Напишите нам',x0+px/2,y0+px+36);c.textAlign='left';
+}
+async function loadQr(){
+ try{const q=await(await api('qr')).json();qrRows=Array.isArray(q.rows)&&q.size>0&&q.rows.length===q.size?q.rows:null;}catch{qrRows=null;}
+ slots.forEach(drawThumb);if(!draft)showSelected();
 }
 function placeholder(c){c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle='#000';c.textAlign='center';c.font='600 34px system-ui';c.fillText('Картинка не загружена',400,250);}
 function textLayout(c,s){
@@ -155,6 +170,10 @@ async function refresh(){
  $('storageNotice').hidden=!!state.recovery||!!state.storageReady;
  if(state.version)$('version').textContent='AviorSign · '+state.version;
  showBattery();
+ if(!settingsShown&&state.qrUrl!==undefined){$('qrEnabled').checked=!!state.qrEnabled;$('qrUrl').value=state.qrUrl;settingsShown=true;}
+ const k=state.qrEnabled+'|'+state.qrUrl;if(k!==qrKey){qrKey=k;loadQr();}
+ $('fwStatus').textContent='Сейчас работает версия '+(state.version||'?')+(state.otaPending?' · новая прошивка проверяется первую минуту; при сбое вернётся прежняя.':'.');
+ $('saveQr').disabled=!!state.recovery;
  showClock();updateButtons();loadAssets();
 }
 const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -220,6 +239,32 @@ $('scanWifi').onclick=()=>run(async()=>{
 });
 $('enableHardware').onclick=()=>run(async()=>{if(!$('confirmHardware').checked)throw Error('Сначала подтвердите проверку платы и матрицы.');await api('hardware','POST',{confirmation:'ESP32-M075-V3.0:F53:18,23,27,14,12,13'});await refresh();feedback('Обновление дисплея разрешено.');});
 $('initStorage').onclick=()=>run(async()=>{if(!$('confirmStorage').checked)throw Error('Отметьте согласие на форматирование раздела картинок.');await api('storage/init','POST',{confirmation:'FORMAT_AVIOR_STORAGE'});await refresh();feedback('Хранилище готово. Можно сохранять картинки.');});
+$('saveQr').onclick=()=>run(async()=>{
+ const url=$('qrUrl').value.trim();if(!/^https?:\/\/\S+$/.test(url))throw Error('Укажите полную ссылку, начиная с https');
+ await api('settings','PUT',{qrEnabled:$('qrEnabled').checked,qrUrl:url});await refresh();await loadQr();
+ feedback($('qrEnabled').checked?'QR-код сохранён. Стандартная картинка текущего статуса обновится.':'QR-код выключен.');
+});
+function firstByte(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(new Uint8Array(r.result)[0]);r.onerror=()=>reject(Error('Не удалось прочитать файл.'));r.readAsArrayBuffer(file.slice(0,1));});}
+function sendFirmware(file){return new Promise((resolve,reject)=>{
+ const x=new XMLHttpRequest();x.open('POST','/api/v1/firmware');x.setRequestHeader('Authorization','Bearer '+key);
+ x.upload.onprogress=e=>{if(e.lengthComputable)$('fwProgress').value=e.loaded/e.total;};
+ x.onload=()=>{let d={};try{d=JSON.parse(x.responseText);}catch{}x.status===200?resolve(d):reject(Error(d.error||'Ошибка загрузки: '+x.status));};
+ x.onerror=()=>reject(Error('Связь прервалась во время загрузки. Прежняя прошивка осталась на месте.'));
+ const f=new FormData();f.append('file',file,'firmware.bin');x.send(f);
+});}
+$('fwUpload').onclick=()=>run(async()=>{
+ const file=$('fwFile').files[0];if(!file)throw Error('Выберите файл firmware.bin.');
+ if(file.size<100000||file.size>0x140000)throw Error('Размер не похож на прошивку AviorSign (нужен firmware.bin до 1,25 МБ).');
+ if(await firstByte(file)!==0xE9)throw Error('Это не файл прошивки ESP32. Нужен firmware.bin из папки сборки.');
+ $('fwProgress').hidden=false;$('fwProgress').value=0;$('fwStatus').textContent='Загрузка прошивки…';
+ await sendFirmware(file);
+ $('fwStatus').textContent='Прошивка записана. Вывеска перезапускается…';feedback('Прошивка загружена, вывеска перезапускается (около 15 секунд).');
+ for(let i=0;i<40;i++){
+  await new Promise(r=>setTimeout(r,3000));
+  try{await refresh();if(state.uptimeSeconds<180){$('fwProgress').hidden=true;feedback('Вывеска запущена с версией '+state.version+'.');return;}}catch{}
+ }
+ $('fwStatus').textContent='Вывеска пока не ответила. Обновите страницу через минуту.';
+});
 $('disconnect').onclick=()=>{sessionStorage.removeItem('aviorKey');key='';state=null;$('login').hidden=false;$('connection').textContent='Устройство отключено';feedback('Ключ удалён из вкладки.');};
 document.querySelectorAll('[role=tab]').forEach(t=>t.addEventListener('click',()=>document.querySelectorAll('[role=tab]').forEach(x=>{const on=x===t;x.setAttribute('aria-selected',on);$(x.getAttribute('aria-controls')).hidden=!on;})));
 slots.forEach(drawThumb);select(selected);

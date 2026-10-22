@@ -16,6 +16,12 @@ Version 0.2.0 stops the radio (AP and STA) for the duration of each panel refres
 
 Version 0.2.1 fixes `PUT /schedule`, which rejected every schedule (see VALIDATION.md), and adds battery fields to state: `adcProbe` maps each ADC1 input (GPIO 32, 33, 34, 35, 36, 39) to its calibrated millivolts, sampled every 5 s outside refreshes; `battery` `{pin, mv, percent, divider}` is present only when one input reads inside the Li-ion window behind the assumed 1:2 divider. Pin and ratio are inferred, not taken from a schematic.
 
+Version 0.3.0:
+
+- `POST /firmware` (multipart field `file`, an ESP32 application image such as `.pio/build/esp32-m075-v3/firmware.bin`) writes the image to the inactive OTA slot, verifies it and restarts about 1.5 s after the 200 reply. The first byte must be 0xE9; failures leave the running image untouched. Allowed in recovery builds too. The new image stays pending (`otaPending: true` in state) for 60 s of uptime; a reset during that minute makes the bootloader return to the previous image. Refused while a refresh runs; no refresh starts during an upload.
+- `PUT /settings {"qrEnabled":true,"qrUrl":"https://…"}` (≤160 characters, http/https) stores the QR settings and redraws the current built-in frame. Saved pictures are never altered. State reports `qrEnabled` and `qrUrl`.
+- `GET /qr` returns `{enabled,url,size,rows}`: the module matrix the firmware draws (rows of `0`/`1`), so clients can preview the exact code.
+
 ## Status and completion
 
 `GET /state` returns desired and displayed status, busy, displayError, hardwareConfirmed, storageReady, automatic, source, timeValid, unixTime, IP, heap, uptimeSeconds, cooldownSeconds and asset availability.
