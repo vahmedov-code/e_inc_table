@@ -188,7 +188,7 @@ async function refresh(){
  const crm=state.crm;
  if(crm){
   if(!crmShown){$('crmEnabled').checked=!!crm.enabled;$('crmUrl').value=crm.url;crmShown=true;}
-  $('crmStatus').textContent=!crm.enabled?'Связь с CRM выключена.':crm.error?'Ошибка связи с CRM: '+crm.error:crm.lastOkSeconds!==undefined?'На связи с CRM · '+crm.lastOkSeconds+' с назад.':'Подключается к CRM…';
+  $('crmStatus').textContent=!crm.enabled?'Связь с CRM выключена.':crm.error?'Ошибка связи с CRM: '+crm.error:crm.lastOkSeconds!==undefined?'На связи с CRM · '+crm.lastOkSeconds+' с назад.':crm.waiting?'Обмен с CRM не идёт: '+crm.waiting+'.':'Подключается к CRM…';
  }
  showClock();updateButtons();loadAssets();
 }

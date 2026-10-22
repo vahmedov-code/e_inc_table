@@ -78,6 +78,7 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.equal(d.getElementById('crmToken').value,'','token field cleared after save');assert.match(d.getElementById('crmStatus').textContent,/На связи с CRM/);
  await click('saveCrm');assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/crm')).opts.body).token,undefined,'empty field keeps the stored token');
  device.crm.error='CRM ответила 401: Неверный токен';await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/401/);
+ device.crm={enabled:true,url:'https://cms.avior.moscow',configured:true,error:'',waiting:'ещё нет точного времени из интернета (нужно для HTTPS)'};await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/не идёт: ещё нет точного времени/);
  assert.match(d.getElementById('powerStatus').textContent,/Экономия выключена/);assert.match(d.getElementById('powerStatus').textContent,/AviorSign-1a2b: выключена/);
  d.getElementById('batterySave').checked=true;await click('savePower');await tick();assert.equal(device.batterySave,true);assert.match(d.getElementById('powerStatus').textContent,/уснёт через 60 с/);
  await click('stayAwake');assert(requests.some(r=>r.url.endsWith('/awake')&&r.opts.method==='POST'));

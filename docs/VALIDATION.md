@@ -1,5 +1,11 @@
 # Validation — 2026-10-21
 
+## Update 0.3.1: visible reason when the CRM exchange does not run
+
+Owner report on 0.3.0: the CRM showed no connection, while the serial log had no `[crm]` line at all for 20 minutes (Wi-Fi connected, battery found on GPIO33 at 4.27 V on USB). 0.3.0 skipped the exchange silently when it was disabled, had no token, had no valid time or lacked heap (it required a 45 KB contiguous block). 0.3.1 reports the reason in the panel (`crm.waiting`) and every 5 s in the log (`[crm] waiting: …`, `[crm] error: …`, `[crm] ok, last exchange …`), adds the mbedTLS error text to connection failures, logs the first successful exchange, and relaxes the heap check to ≥50 KB free with a ≥20 KB largest block.
+
+The production certificate is issued by Let's Encrypt YE2. Neither the container's CA store nor certifi 2026.10.19 contains the newer ISRG Root YE/YR, while browsers accept the site, so the served chain should lead to ISRG Root X1/X2, which the firmware trusts. Not yet confirmed on the device.
+
 ## Update 0.3.0: firmware over Wi-Fi and QR code
 
 ### Battery mode, access point, QR everywhere (same version)

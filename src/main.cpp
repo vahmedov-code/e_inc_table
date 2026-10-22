@@ -101,6 +101,7 @@ const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image"
 constexpr int CRM_ITEM_COUNT=9;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 Preferences crmPrefs;
+const char* crmWaitReason();
 int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
 // Skipped during a refresh: the panel load would read as a discharged battery.
 void sampleBattery(){
@@ -287,6 +288,7 @@ void state(){
   d["batterySave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
+   if(const char* wait=crmWaitReason())c["waiting"]=wait;
    if(crmEverOk)c["lastOkSeconds"]=(millis()-crmLastOk)/1000;}
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
@@ -400,6 +402,19 @@ bool crmApply(JsonDocument& r){
   }
   return changed;
 }
+// Why the CRM exchange is not running right now (nullptr: it may run), shown in the panel
+// and the health log instead of skipping silently.
+const char* crmWaitReason(){
+  if(!crmEnabled)return "связь с CRM выключена";
+  if(!crmToken.length())return "не введён токен вывески";
+  if(rendering||radioPaused)return "обновляется экран";
+  if(otaBusy||restartAt)return "идёт обновление прошивки";
+  if(WiFi.status()!=WL_CONNECTED)return "нет подключения к офисному Wi-Fi";
+  if(time(nullptr)<=1700000000)return "ещё нет точного времени из интернета (нужно для HTTPS)";
+  // TLS needs about 40 KB in several blocks.
+  if(ESP.getFreeHeap()<50000||ESP.getMaxAllocHeap()<20000)return "мало свободной памяти для HTTPS";
+  return nullptr;
+}
 void crmSync(){
   crmLastTry=millis();
   HTTPClient http;WiFiClientSecure tls;WiFiClient plain;
@@ -407,9 +422,14 @@ void crmSync(){
   http.addHeader("Content-Type","application/json");
   int code=http.POST(crmReport());
   crmDoneThisWake=true; // a failing CRM must not keep a battery-powered sign awake
-  if(code!=200){crmError=crmFail(http,code);http.end();Serial.printf("[crm] %s\n",crmError.c_str());return;}
+  if(code!=200){
+    crmError=crmFail(http,code);char tlsError[96];
+    if(code<0&&tls.lastError(tlsError,sizeof tlsError))crmError+=String(" (TLS: ")+tlsError+")";
+    http.end();Serial.printf("[crm] %s\n",crmError.c_str());return;
+  }
   JsonDocument r;DeserializationError err=deserializeJson(r,http.getString());http.end();
   if(err||!r["ok"].as<bool>()){crmError="Непонятный ответ CRM";return;}
+  if(!crmEverOk)Serial.println("[crm] first exchange with the CRM succeeded");
   crmError="";crmLastOk=millis();crmEverOk=true;
   crmIntervalMs=constrain((int)(r["pollSeconds"]|10),5,300)*1000UL;
   if(crmApply(r)){
@@ -714,15 +734,18 @@ void loop(){
     if(automatic&&now>1700000000){source="schedule";now+=utcOffset*60;tm t;gmtime_r(&now,&t);int s=scheduledStatus(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);if(s>=0&&desired!=s){desired=s;displayError="";}}
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }
-  // TLS needs about 40 KB; skipped while the radio is off for a refresh or an upload runs.
-  if(crmEnabled&&crmToken.length()&&!rendering&&!radioPaused&&!otaBusy&&!restartAt&&time(nullptr)>1700000000
-     &&WiFi.status()==WL_CONNECTED&&ESP.getMaxAllocHeap()>45000&&millis()-crmLastTry>=crmIntervalMs)crmSync();
+  if(!crmWaitReason()&&millis()-crmLastTry>=crmIntervalMs)crmSync();
   if(millis()-lastHealth>=5000){
     lastHealth=millis();sampleBattery();
     Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?batteryPercent(batteryMv):-1);
     for(int i=0;i<ADC_PROBE_COUNT;i++)Serial.printf(" %d:%d",ADC_PROBE_PINS[i],adcMv[i]);Serial.println();
     WifiSnapshot wifi=wifiSnapshot();
     Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%s arduino_wifi=%d ip=%s associated=%d netif_up=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),stationStateName(wifi.state()),wifi.evidence.arduinoStatus,wifi.state()==StationState::Connected?wifi.address.toString().c_str():"0.0.0.0",wifi.evidence.associated,wifi.evidence.interfaceUp,resetName(bootReason),(int)bootReason);
+    const char* crmWait=crmWaitReason();
+    if(!crmEnabled){}
+    else if(crmWait)Serial.printf("[crm] waiting: %s\n",crmWait);
+    else if(crmError.length())Serial.printf("[crm] error: %s\n",crmError.c_str());
+    else if(crmEverOk)Serial.printf("[crm] ok, last exchange %lus ago\n",(unsigned long)((millis()-crmLastOk)/1000));
   }
   delay(2);
 }
