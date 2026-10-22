@@ -18,6 +18,11 @@ jobs:
       - run: python -m platformio run -e esp32-m075-recovery
       - run: python -m platformio run -e esp32-m075-recovery-wifi
       - run: g++ -std=c++17 -Wall -I include -I .pio/libdeps/esp32-m075-v3/ArduinoJson/src tools/test_schedule.cpp -o .pio/test_schedule && .pio/test_schedule
+      - run: |
+          L=.pio/libdeps/esp32-m075-v3
+          gcc -c -I "$L/U8g2_for_Adafruit_GFX/src" "$L/U8g2_for_Adafruit_GFX/src/u8g2_fonts.c" -o .pio/u8g2_fonts.o
+          g++ -std=c++17 -DARDUINO=100 -I tools/host -I include -I "$L/Adafruit GFX Library" -I "$L/U8g2_for_Adafruit_GFX/src" tools/test_compose.cpp "$L/Adafruit GFX Library/Adafruit_GFX.cpp" "$L/U8g2_for_Adafruit_GFX/src/U8g2_for_Adafruit_GFX.cpp" .pio/u8g2_fonts.o -o .pio/test_compose
+          .pio/test_compose
       - run: python tools/check_project.py
       - run: npm install --prefix .pio/ui-tests --no-audit --no-fund jsdom@26.1.0 @napi-rs/canvas@0.1.80
       - run: node tools/test_ui.cjs

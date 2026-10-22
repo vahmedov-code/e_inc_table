@@ -1,30 +1,8 @@
 #pragma once
-#include <Adafruit_GFX.h>
 #include <SPI.h>
 #include "board.h"
+#include "frame.h"
 #include "render_trace.h"
-
-// Native JD79665CA: 0 black, 1 white, 2 yellow, 3 red; MSB pixel first.
-class Frame : public Adafruit_GFX {
-public:
-  uint8_t* bytes;
-  explicit Frame(uint8_t* p) : Adafruit_GFX(800,480), bytes(p) {}
-  void drawPixel(int16_t x,int16_t y,uint16_t color) override {
-    if(x<0 || y<0 || x>=800 || y>=480) return;
-    size_t i=y*200+x/4; int shift=6-2*(x%4);
-    bytes[i]=(bytes[i]&~(3<<shift))|((color&3)<<shift);
-  }
-};
-
-class ScaledText : public Adafruit_GFX {
-  Frame& target;
-  int scale;
-public:
-  ScaledText(Frame& frame,int factor) : Adafruit_GFX(800/factor,480/factor),target(frame),scale(factor) {}
-  void drawPixel(int16_t x,int16_t y,uint16_t color) override {
-    target.fillRect(x*scale,y*scale,scale,scale,color);
-  }
-};
 
 class Panel {
   void byte(uint8_t b,bool data) {
@@ -48,7 +26,8 @@ public:
   void (*phase)(uint8_t)=nullptr;
   // Protocol verified against Good Display A32-GDEM075F53-F-20260709.
   // Full refresh only. No F52 waveform or controller substitution.
-  bool show(const uint8_t* data) {
+  // fill(buf,band) composes the next band into buf right before it is sent.
+  template<typename Fill> bool show(uint8_t* buf,Fill fill) {
     pinMode(EPD_BUSY,INPUT); pinMode(EPD_CS,OUTPUT);
     pinMode(EPD_DC,OUTPUT); pinMode(EPD_RST,OUTPUT);
     digitalWrite(EPD_CS,HIGH);digitalWrite(EPD_RST,HIGH);
@@ -66,7 +45,10 @@ public:
     }
     if(ok) {
       mark(PHASE_FRAME);cmd(0x10);
-      for(size_t i=0;i<FRAME_BYTES;i++) {byte(data[i],true);if((i&1023)==0)delay(1);}
+      for(int band=0;band<FRAME_BANDS;band++) {
+        fill(buf,band);
+        for(size_t i=0;i<BAND_BYTES;i++) {byte(buf[i],true);if((i&1023)==0)delay(1);}
+      }
       mark(PHASE_REFRESH);reg(0x12,{0});ok=ready();
     }
     // Always attempt power off and deep sleep, even following a timeout.

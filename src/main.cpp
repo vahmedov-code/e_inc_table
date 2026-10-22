@@ -23,6 +23,7 @@
 #if !AVIOR_RECOVERY
 #include <U8g2_for_Adafruit_GFX.h>
 #include "panel.h"
+#include "compose.h"
 #endif
 #include <atomic>
 #include <time.h>
@@ -185,45 +186,20 @@ void renderPhase(uint8_t p){
   Serial.printf("[display] phase=%s t_ms=%lu heap=%u stack_free=%u\n",phaseName(p),(unsigned long)millis(),ESP.getFreeHeap(),(unsigned)uxTaskGetStackHighWaterMark(nullptr));
 }
 void worker(void*) {
-  uint8_t* data=(uint8_t*)malloc(FRAME_BYTES);
+  uint8_t* band=(uint8_t*)malloc(BAND_BYTES);
   workerStackFree=uxTaskGetStackHighWaterMark(nullptr);
   int s;
   for(;;){
-    xQueueReceive(jobs,&s,portMAX_DELAY);bool ok=data!=nullptr;
+    xQueueReceive(jobs,&s,portMAX_DELAY);bool ok=band!=nullptr;
+    File asset;bool loaded=false,readOk=true;
+    if(ok&&fsReady){asset=LittleFS.open(assetPath(s),"r");loaded=asset&&asset.size()==FRAME_BYTES;}
+    if(!loaded && s==3)ok=false;
     if(ok){
-      bool loaded=false;
-      if(fsReady){File f=LittleFS.open(assetPath(s),"r");if(f&&f.size()==FRAME_BYTES)loaded=f.read(data,FRAME_BYTES)==FRAME_BYTES;f.close();}
-      if(!loaded && s==3)ok=false;
-      if(ok){
-        Frame f(data);
-        if(!loaded){
-          memset(data,0x55,FRAME_BYTES);
-          f.fillRect(40,40,720,8,s==1?3:s==2?2:0);
-          f.setTextColor(0);f.setTextSize(5);f.setCursor(44,85);f.print("AVIOR");
-          ScaledText text(f,4);U8G2_FOR_ADAFRUIT_GFX font;font.begin(text);font.setFont(u8g2_font_unifont_t_cyrillic);
-          font.setForegroundColor(0);font.setBackgroundColor(1);font.setCursor(11,66);font.print(names[s]);
-          f.setTextSize(2);f.setCursor(44,410);f.print("avior.local");
-        }
-        // The QR goes on every picture; a saved one gets a white plate so the code stays readable.
-        if(qrEnabled&&qr.size){
-          const int scale=qrScale(qr.size,220),px=qr.size*scale,x0=760-px,y0=130;
-          if(loaded)f.fillRect(x0-14,y0-14,px+28,px+70,1);
-          for(int y=0;y<qr.size;y++)for(int x=0;x<qr.size;x++)if(qr.get(x,y))f.fillRect(x0+x*scale,y0+y*scale,scale,scale,0);
-          ScaledText small(f,2);U8G2_FOR_ADAFRUIT_GFX caption;caption.begin(small);caption.setFont(u8g2_font_unifont_t_cyrillic);
-          caption.setForegroundColor(0);caption.setBackgroundColor(1);
-          const char* line=s==0?"Мы на связи":"Напишите нам";
-          caption.setCursor((x0+px/2)/2-caption.getUTF8Width(line)/2,(y0+px+36)/2);caption.print(line);
-        }
-        // Discreet low-battery mark for the owner, bottom right.
-        if(batteryPin>=0&&batteryPercent(batteryMv)<=15){
-          f.fillRect(700,424,64,32,1);f.drawRect(706,430,44,20,0);f.drawRect(707,431,42,18,0);f.fillRect(750,435,4,10,0);f.fillRect(709,433,8,14,3);
-        }
-      }
-      if(ok){
-        Serial.printf("[display] start status=%s\n",keys[s]);renderPhase(PHASE_START);
-        Panel panel;panel.phase=renderPhase;ok=panel.show(data);
-        renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d\n",ok);
-      }
+      Serial.printf("[display] start status=%s\n",keys[s]);renderPhase(PHASE_START);
+      Panel panel;panel.phase=renderPhase;
+      ComposeInput in{s,names[s],qrEnabled?&qr:nullptr,batteryPin>=0&&batteryPercent(batteryMv)<=15};
+      ok=panel.show(band,[&](uint8_t* buf,int b){readOk&=composeRows(buf,b*BAND_ROWS,BAND_ROWS,in,loaded?&asset:(File*)nullptr);})&&readOk;
+      renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d\n",ok);
     }
     workerStackFree=uxTaskGetStackHighWaterMark(nullptr);
     Result r{s,ok};xQueueSend(results,&r,portMAX_DELAY);

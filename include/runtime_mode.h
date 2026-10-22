@@ -12,4 +12,4 @@ constexpr bool RECOVERY_MODE = AVIOR_RECOVERY != 0;
 constexpr bool RECOVERY_WIFI = RECOVERY_MODE && AVIOR_RECOVERY_WIFI != 0;
 constexpr bool canMutate(bool wifi=false){return !RECOVERY_MODE || (RECOVERY_WIFI && wifi);}
 constexpr const char* MODE_NAME = RECOVERY_WIFI ? "recovery-wifi" : RECOVERY_MODE ? "recovery" : "normal";
-constexpr const char* FW_VERSION = RECOVERY_WIFI ? "0.3.1-recovery-wifi" : RECOVERY_MODE ? "0.3.1-recovery" : "0.3.1";
+constexpr const char* FW_VERSION = RECOVERY_WIFI ? "0.3.2-recovery-wifi" : RECOVERY_MODE ? "0.3.2-recovery" : "0.3.2";

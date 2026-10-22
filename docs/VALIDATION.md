@@ -1,5 +1,11 @@
 # Validation — 2026-10-21
 
+## Update 0.3.2: frame sent in bands, freeing heap for TLS
+
+0.3.1 on the board reported `Нет связи с CRM: connection refused (TLS: SSL - Memory allocation failed)`. The display worker held a whole 96 KB frame permanently, leaving about 120 KB in fragments. The frame is now composed and sent in four 120-row bands from one 24 KB buffer (`include/frame.h`, `include/compose.h`, `Panel::show(buf, fill)`); the panel receives the same byte stream after its 0x10 command. About 72 KB more heap stays free between refreshes.
+
+`tools/test_compose.cpp` builds the real compose code with the real Adafruit GFX and U8g2 fonts on the host (Arduino stubbed in `tools/host/`) and checks 28 combinations of status, saved picture, QR code and low-battery mark: the banded frame equals the whole frame byte for byte. A deliberately broken band clip makes it fail. CI runs it. Not yet run on the board: free heap after the change and the TLS exchange itself.
+
 ## Update 0.3.1: visible reason when the CRM exchange does not run
 
 Owner report on 0.3.0: the CRM showed no connection, while the serial log had no `[crm]` line at all for 20 minutes (Wi-Fi connected, battery found on GPIO33 at 4.27 V on USB). 0.3.0 skipped the exchange silently when it was disabled, had no token, had no valid time or lacked heap (it required a 45 KB contiguous block). 0.3.1 reports the reason in the panel (`crm.waiting`) and every 5 s in the log (`[crm] waiting: …`, `[crm] error: …`, `[crm] ok, last exchange …`), adds the mbedTLS error text to connection failures, logs the first successful exchange, and relaxes the heap check to ≥50 KB free with a ≥20 KB largest block.
