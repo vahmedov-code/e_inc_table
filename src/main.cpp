@@ -71,10 +71,12 @@ void logSaveChunk(int c){char k[4];snprintf(k,sizeof k,"c%d",c);logPrefs.putByte
 void logStore(const LogRecord& e){
   logRing[logNext%LOG_CAPACITY]=e;logSaveChunk(logNext%LOG_CAPACITY/LOG_CHUNK);logPrefs.putUInt("next",++logNext);logInWindow++;
 }
+// Settings come first: the log stops writing while NVS is low on free entries.
+bool logRoom(){nvs_stats_t st;return nvs_get_stats(nullptr,&st)==ESP_OK&&st.free_entries>=48;}
 void logRecord(const LogRecord& e){
   char text[200];eventText(e,text,sizeof text);Serial.printf("[event] %s\n",text);
   if(!logReady)return;
-  if(logInWindow>=LOG_BURST){logDropped++;return;}
+  if(logInWindow>=LOG_BURST||!logRoom()){logDropped++;return;}
   logStore(e);
 }
 void logEvent(EventKind kind,int code=0,int32_t value=0,int32_t extra=0){logRecord({logNow(),value,extra,(int16_t)code,kind,(uint8_t)bootCount});}
@@ -95,7 +97,7 @@ void logTick(){
   if(!logReady)return;
   if(millis()-logWindowAt>=LOG_WINDOW_MS){
     logWindowAt=millis();logInWindow=0;
-    if(logDropped){logStore({logNow(),logDropped,0,0,EV_DROPPED,(uint8_t)bootCount});logDropped=0;}
+    if(logDropped&&logRoom()){logStore({logNow(),logDropped,0,0,EV_DROPPED,(uint8_t)bootCount});logDropped=0;}
   }
   if(logClockFixed||time(nullptr)<=(time_t)LOG_VALID_TIME)return;
   logClockFixed=true;uint32_t now=time(nullptr),up=millis()/1000;bool dirty[LOG_CHUNKS]={};

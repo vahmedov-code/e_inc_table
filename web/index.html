@@ -225,7 +225,8 @@ function showLog(){
   const li=document.createElement('li'),t=document.createElement('time'),text=document.createElement('span');
   t.textContent=eventTime(e);text.textContent=e.text;li.className=eventClass(e);li.append(t,text);list.append(li);
  }
- $('logStatus').textContent=logData.events.length?'Событий: '+logData.events.length+' из '+logData.capacity+', новые сверху. Время — '+offsetName(Number($('timezone').value)||0)+'.':'Событий пока нет.';
+ const nvs=state?.log?.nvsFree!==undefined?' Свободно в памяти настроек: '+state.log.nvsFree+' записей'+(state.log.nvsFree<48?' — мало, журнал не пишется.':'.'):'';
+ $('logStatus').textContent=(logData.events.length?'Событий: '+logData.events.length+' из '+logData.capacity+', новые сверху. Время — '+offsetName(Number($('timezone').value)||0)+'.':'Событий пока нет.')+nvs;
 }
 async function loadLog(){logData=await(await api('events')).json();showLog();}
 const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];

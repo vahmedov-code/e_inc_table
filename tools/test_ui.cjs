@@ -161,6 +161,7 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.equal(rows[1].querySelector('time').textContent,'+12 с от запуска','time before the clock is set');
  assert.match(rows[0].querySelector('time').textContent,/^\d\d\.\d\d, \d\d:\d\d:\d\d$/);
  assert.match(d.getElementById('logStatus').textContent,/Событий: 3 из 64/);
+ device.log={next:4,boot:2,nvsUsed:300,nvsFree:30};await w.refresh();await click('loadLog');assert.match(d.getElementById('logStatus').textContent,/30 записей — мало/);
  let saved=null;w.URL.createObjectURL=b=>{saved=b;return 'blob:log';};w.URL.revokeObjectURL=()=>{};let fileName='';w.HTMLAnchorElement.prototype.click=function(){fileName=this.download;};
  await click('downloadLog');await waitFor(()=>saved);
  const file=await saved.text();assert.match(fileName,/^aviorsign-log-\d{4}-\d\d-\d\d\.txt$/);assert.match(file,/^AviorSign /);const body=file.trim().split('\r\n').slice(2);
