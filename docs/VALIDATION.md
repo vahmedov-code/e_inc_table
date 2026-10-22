@@ -1,4 +1,12 @@
-# Validation — 2026-10-21
+# Validation — 2026-10-22
+
+## Update 0.4.0: owner's templates and the event log
+
+Built-in pictures are the owner's three designs. `tools/prepare_templates.py` quantises them to the panel's four colours, removes speckles, takes the shared bottom strip from «Скоро буду» and clears the QR square; `tools/make_templates.py` packs and run-length encodes them (round-trip asserted) into `include/templates.h`, about 78 KB of flash for all three. `tools/test_compose.cpp` checks every banded frame against a checksum of the template and the QR modules at the new square.
+
+Event log: `include/event_log.h` (16-byte records, Russian texts made on reading), ring and snapshot in `src/main.cpp`, journal tab in the panel, `GET /api/v1/events`, copy to the CRM with acknowledgement. `tools/test_event_log.cpp` checks the texts, UTF-8 trimming and version numbers on the host; `tools/test_ui.cjs` checks the journal tab, highlighting and the .txt download. The CRM side (`door_sign_store_events`, migration `2026_10_23_door_sign_events.sql`) was run against a local MariaDB: events stored with the sign's time, a resent batch not duplicated, a restarted device counter accepted, a CRM-0.3 report still handled. Firmware 1,226,637 bytes (93 % of the OTA slot); recovery 1,053,989 and 1,093,933 bytes.
+
+Not yet run on the board: NVS free entries with the log (reported in state as `log.nvsFree`), the pre-reset snapshot after a real brownout (RTC memory is expected, not verified, to survive a brownout reset), Wi-Fi disconnect reasons from the router.
 
 ## Update 0.3.2: frame sent in bands, freeing heap for TLS
 
@@ -126,6 +134,7 @@ The firmware now samples SDK operating mode, actual association and ESP-NETIF ad
 ```powershell
 python -m platformio run
 python tools/check_project.py
+g++ -std=c++17 -Wall -I include tools/test_event_log.cpp -o .pio/test_event_log && .pio/test_event_log
 npm install --prefix .pio/ui-tests --no-audit --no-fund jsdom@26.1.0 @napi-rs/canvas@0.1.80
 node tools/test_ui.cjs
 ```

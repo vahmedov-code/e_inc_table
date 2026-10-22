@@ -18,6 +18,7 @@ jobs:
       - run: python -m platformio run -e esp32-m075-recovery
       - run: python -m platformio run -e esp32-m075-recovery-wifi
       - run: g++ -std=c++17 -Wall -I include -I .pio/libdeps/esp32-m075-v3/ArduinoJson/src tools/test_schedule.cpp -o .pio/test_schedule && .pio/test_schedule
+      - run: g++ -std=c++17 -Wall -I include tools/test_event_log.cpp -o .pio/test_event_log && .pio/test_event_log
       - run: |
           L=.pio/libdeps/esp32-m075-v3
           gcc -c -I "$L/U8g2_for_Adafruit_GFX/src" "$L/U8g2_for_Adafruit_GFX/src/u8g2_fonts.c" -o .pio/u8g2_fonts.o

@@ -28,7 +28,12 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
        const scanning=scanMode==='ok'&&scanPolls++===0;
        return {ok:true,status:scanning?202:200,json:async()=>({scanning,networks:scanMode==='empty'?[]:[{ssid:'Office-Test',rssi:-42,secure:true},{ssid:'<img src=x onerror=alert(1)>',rssi:-60,secure:false}]})};
      }
+     if(url.includes('/builtin?slot='))return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0x55).buffer};
      if(url.includes('/asset?slot=')&&opts.method==='GET')return {ok:true,status:200,arrayBuffer:async()=>new Uint8Array(96000).fill(0xff).buffer};
+     if(url.endsWith('/events'))return {ok:true,status:200,json:async()=>({next:4,boot:2,now:1792587600,uptime:30,capacity:64,events:[
+       {seq:3,time:1792587590,timeValid:true,boot:2,kind:'wifi_down',code:200,text:'Wi-Fi пропал: пропал сигнал роутера (код 200)'},
+       {seq:2,time:12,timeValid:false,boot:2,kind:'boot',code:9,text:'Запуск 0.4.0 · просадка питания (brownout)'},
+       {seq:1,time:1792500000,timeValid:true,boot:1,kind:'refresh',code:0,text:'Экран обновлён: «Открыто» за 24,8 с'}]})};
      if(url.endsWith('/qr'))return {ok:true,status:200,json:async()=>device.qrEnabled?{enabled:true,size:3,rows:['101','010','101']}:{enabled:false,size:3,rows:['101','010','101']}};
      if(url.endsWith('/power'))Object.assign(device,{batterySave:data.batterySave,awakeSeconds:60});
      if(url.endsWith('/crm'))device.crm={enabled:data.enabled,url:data.url,configured:device.crm.configured||!!data.token,error:'',lastOkSeconds:data.enabled?3:undefined};
@@ -61,8 +66,9 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
    w.unpack(b);assert.equal(w.pack()[0],byte,'round trip palette');
  }
  for(const [css,byte]of [['#8a8a8a',0x55],['#707070',0]]){w.eval(`ctx.fillStyle='${css}';ctx.fillRect(0,0,800,480);`);assert.equal(w.pack()[0],byte,`gray ${css} never becomes red`);}
+ assert(['open','closed','soon'].every(slot=>requests.some(r=>r.url.endsWith('/builtin?slot='+slot))),'built-in templates are loaded from the sign');
  assert.equal(d.getElementById('version').textContent,'AviorSign · 0.3.0');
- const px=()=>Array.from(w.eval('ctx').getImageData(545,135,1,1).data.slice(0,3));
+ const px=()=>Array.from(w.eval('ctx').getImageData(683,292,1,1).data.slice(0,3));
  d.querySelector('[data-status="closed"]').click();await tick();assert.deepEqual(px(),[0,0,0],'QR module drawn in the built-in preview');
  assert.equal(d.getElementById('qrUrl').value,'https://avior.moscow/na-svyazi/');
  d.getElementById('qrEnabled').checked=false;await click('saveQr');await tick();assert.equal(device.qrEnabled,false);
@@ -91,8 +97,8 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  await click('makeTemplate');assert.equal(d.getElementById('saveImage').disabled,false);
  await click('saveImage');const upload=requests.findLast(r=>r.url.includes('/assets?slot=open'));
  assert(upload,'template saved for the selected status');const sent=new Uint8Array(await upload.opts.body.get('file').arrayBuffer());assert.equal(sent.byteLength,96000);
- assert.equal((sent[135*200+136]>>4)&3,1,'the QR overlay of the preview is not baked into the uploaded picture');
- assert.deepEqual(Array.from(w.eval('ctx').getImageData(545,135,1,1).data.slice(0,3)),[0,0,0],'preview shows the QR over a saved picture');
+ assert.equal(sent[292*200+170]&3,1,'the QR overlay of the preview is not baked into the uploaded picture');
+ assert.deepEqual(Array.from(w.eval('ctx').getImageData(683,292,1,1).data.slice(0,3)),[0,0,0],'preview shows the QR over a saved picture');
  assert.equal(d.querySelector('[data-kind="open"]').textContent,'своя картинка');
  const fileInput=d.getElementById('imageFile');Object.defineProperty(fileInput,'files',{configurable:true,value:[{type:'image/png',size:256}]});
  d.querySelector('[data-status="soon"]').click();fileInput.dispatchEvent(new w.Event('change'));await tick();
@@ -148,6 +154,17 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  assert.match(d.getElementById('connection').textContent,/ожидается IP/);
  device.wifiStatus='unknown';await w.refresh();
  assert.match(d.getElementById('connection').textContent,/неизвестно/);
+ d.querySelector('[aria-controls="tabLog"]').click();await waitFor(()=>d.querySelectorAll('#eventLog li').length===3);
+ assert.equal(d.getElementById('tabLog').hidden,false);assert.equal(d.getElementById('tabDevice').hidden,true);
+ const rows=[...d.querySelectorAll('#eventLog li')];
+ assert.equal(rows[0].className,'bad','Wi-Fi drop highlighted');assert.equal(rows[1].className,'boot bad','brownout boot highlighted');assert.equal(rows[2].className,'');
+ assert.equal(rows[1].querySelector('time').textContent,'+12 с от запуска','time before the clock is set');
+ assert.match(rows[0].querySelector('time').textContent,/^\d\d\.\d\d, \d\d:\d\d:\d\d$/);
+ assert.match(d.getElementById('logStatus').textContent,/Событий: 3 из 64/);
+ let saved=null;w.URL.createObjectURL=b=>{saved=b;return 'blob:log';};w.URL.revokeObjectURL=()=>{};let fileName='';w.HTMLAnchorElement.prototype.click=function(){fileName=this.download;};
+ await click('downloadLog');await waitFor(()=>saved);
+ const file=await saved.text();assert.match(fileName,/^aviorsign-log-\d{4}-\d\d-\d\d\.txt$/);assert.match(file,/^AviorSign /);const body=file.trim().split('\r\n').slice(2);
+ assert.equal(body.length,3);assert.match(body[0],/\trefresh\t/,'oldest first in the file');assert.match(body[2],/\twifi_down\t/);
  await click('disconnect');assert.equal(w.sessionStorage.getItem('aviorKey'),null);
- assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload and stale-image guard: PASS');dom.window.close();
+ assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload, stale-image guard and event log: PASS');dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});

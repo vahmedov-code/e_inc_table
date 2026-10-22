@@ -8,7 +8,8 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 .full{width:100%}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.caption{font-size:12px;color:var(--muted);margin:8px 0 0}.picture{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}.notice{border-left:4px solid #9a8c48;background:var(--warn);padding:12px 14px;margin:10px 0;border-radius:4px;font-size:14px}.check{display:flex;gap:10px;align-items:start;margin:10px 0;font-size:14px}.check input{min-height:20px;width:20px;flex-shrink:0}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}.form-grid>*{min-width:0}.form-grid input,.form-grid select{width:100%}details{margin-top:12px}summary{cursor:pointer;font-weight:600;min-height:40px;font-size:14px}
 .tabs{display:flex;gap:6px;margin:22px 0 0;flex-wrap:wrap}.tabs button{border-radius:10px 10px 0 0;border-bottom:none}.tabs button[aria-selected=true]{background:var(--card);border-color:var(--line);box-shadow:0 2px 0 var(--card)}.tabs button[aria-selected=false]{background:transparent;color:var(--muted)}.tabpanel{border-top-left-radius:0}.schedule-list{display:grid;gap:8px;margin:12px 0}.event{display:grid;grid-template-columns:1fr 1fr 1.3fr 44px;gap:8px}.event button{padding:6px}.schedule-head{display:flex;justify-content:space-between;gap:12px;align-items:end;flex-wrap:wrap}.schedule-head select{max-width:180px}.clock{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:14px}.clock.bad{color:var(--error)}
 .login{margin-bottom:20px;max-width:620px}.login .actions input{flex:1;min-width:120px}.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10;max-width:min(680px,calc(100% - 24px));padding:12px 18px;background:var(--dark);color:white;border-radius:12px;box-shadow:0 10px 30px #0003;overflow-wrap:anywhere;font-size:15px}.toast.error{background:#8d2424}[hidden]{display:none!important}footer{max-width:1320px;margin:0 auto;padding:16px 24px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:15px}code{overflow-wrap:anywhere;font-size:13px}
-@media(min-width:901px){.layout>.card:first-child{position:sticky;top:72px}}@media(max-width:900px){.bar{position:static}.layout{grid-template-columns:1fr}main{padding:14px}.bar-in{padding:10px 14px}.card{padding:16px}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr 1fr}.event button{justify-self:end;width:44px}.pills{justify-content:flex-start}}@media(max-width:560px){.tile{grid-template-columns:1fr;gap:6px}.tile canvas{width:100%}.pill{font-size:12px;padding:5px 10px}.toast{top:12px;bottom:auto}body{padding-bottom:24px}}@media(prefers-reduced-motion:no-preference){button{transition:background .15s,border-color .15s}}
+.log{list-style:none;margin:12px 0 0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.log li{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;padding:8px 12px;border-top:1px solid var(--line);font-size:14px}.log li:first-child{border-top:none}.log time{color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}.log li.boot{background:#eef0e8;font-weight:600}.log li.bad span{color:var(--error)}.log li.bad{background:#fbf1ef}.log li.boot.bad{background:#f8dfdc}
+@media(min-width:901px){.layout>.card:first-child{position:sticky;top:72px}}@media(max-width:900px){.bar{position:static}.layout{grid-template-columns:1fr}main{padding:14px}.bar-in{padding:10px 14px}.card{padding:16px}.form-grid{grid-template-columns:1fr}.event{grid-template-columns:1fr 1fr}.event button{justify-self:end;width:44px}.pills{justify-content:flex-start}}@media(max-width:560px){.log li{grid-template-columns:1fr;gap:2px}.tile{grid-template-columns:1fr;gap:6px}.tile canvas{width:100%}.pill{font-size:12px;padding:5px 10px}.toast{top:12px;bottom:auto}body{padding-bottom:24px}}@media(prefers-reduced-motion:no-preference){button{transition:background .15s,border-color .15s}}
 </style></head><body>
 <header class="bar"><div class="bar-in"><div class="brand">avior<span> / sign</span></div><div class="pills"><span class="pill" id="battery" hidden></span><span class="pill" id="connection">Устройство не подключено</span><span class="pill" id="deviceState" role="status">Подключитесь, чтобы узнать состояние</span></div></div></header>
 <main>
@@ -27,11 +28,11 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <div class="picture"><h3>Картинка для «<span id="slotName">Закрыто</span>»</h3>
 <div class="notice" id="storageNotice" hidden>Чтобы сохранять свои картинки, один раз подготовьте хранилище. Будет отформатирован только раздел картинок 0x290000–0x3FFFFF; настройки и прошивка не затрагиваются.<label class="check"><input id="confirmStorage" type="checkbox"><span>Разрешаю отформатировать раздел картинок</span></label><button id="initStorage">Подготовить хранилище</button></div>
 <div class="actions"><label class="filebtn" id="fileLabel">Выбрать файл…<input id="imageFile" type="file" accept="image/png,image/jpeg"></label><button class="primary" id="saveImage">Сохранить картинку</button><button id="resetImage">Вернуть стандартную</button></div>
-<p class="caption">PNG или JPEG вписывается в 800 × 480 с белыми полями и переводится в 4 цвета прямо в браузере. QR-код вывеска рисует сама поверх любой картинки справа — оставляйте эту часть свободной. Картинка текущего статуса после сохранения выводится на вывеску сама.</p>
+<p class="caption">PNG или JPEG вписывается в 800 × 480 с белыми полями и переводится в 4 цвета прямо в браузере. QR-код с подписью «Связаться» вывеска рисует сама справа внизу (квадрат около 100 px над нижней строкой) — оставляйте это место свободным. Картинка текущего статуса после сохранения выводится на вывеску сама.</p>
 <details><summary>Текстовый макет вместо файла</summary><div class="form-grid"><label>Название<input id="brand" value="AVIOR" maxlength="24"></label><label>Подпись<input id="subtitle" value="Рады вас видеть" maxlength="48"></label></div><div class="actions"><button id="makeTemplate">Собрать макет</button></div></details>
 </div></section>
 </div>
-<nav class="tabs" role="tablist"><button role="tab" aria-selected="true" aria-controls="tabSchedule" id="tabBtnSchedule">Расписание</button><button role="tab" aria-selected="false" aria-controls="tabWifi">Wi‑Fi</button><button role="tab" aria-selected="false" aria-controls="tabDevice">Устройство</button></nav>
+<nav class="tabs" role="tablist"><button role="tab" aria-selected="true" aria-controls="tabSchedule" id="tabBtnSchedule">Расписание</button><button role="tab" aria-selected="false" aria-controls="tabWifi">Wi‑Fi</button><button role="tab" aria-selected="false" aria-controls="tabDevice">Устройство</button><button role="tab" aria-selected="false" aria-controls="tabLog">Журнал</button></nav>
 <section class="card tabpanel" id="tabSchedule" role="tabpanel"><div class="schedule-head"><div><h2>Недельное расписание</h2><p class="muted" style="margin:6px 0 0">Статус держится до следующего события, в том числе ночью и в выходные.</p></div><label>Часовой пояс<select id="timezone"><option value="180">Москва · UTC+3</option><option value="0">UTC</option><option value="60">UTC+1</option><option value="120">UTC+2</option><option value="240">UTC+4</option><option value="300">UTC+5</option></select></label></div><div id="events" class="schedule-list"></div><div class="actions"><button id="addEvent">Добавить событие</button><button class="primary" id="saveSchedule">Сохранить и включить</button><button id="pauseSchedule">Выключить расписание</button></div><div class="clock" id="clockBox"><span id="clockState">Время вывески неизвестно.</span><button id="syncClock">Установить время с этого устройства</button></div></section>
 <section class="card tabpanel" id="tabWifi" role="tabpanel" hidden><form id="wifiForm"><div class="form-grid"><label>Доступные сети 2,4 ГГц<select id="wifiNetworks"><option value="">Сначала нажмите «Найти сети»</option></select></label><button id="scanWifi" type="button" style="align-self:end">Найти сети</button></div><p class="caption" id="wifiScanStatus" role="status">Поиск выполняет сама вывеска. Для скрытой сети введите имя вручную.</p><div class="form-grid"><label>Имя сети<input id="ssid" maxlength="32" required autocomplete="off"></label><label>Пароль сети<input id="wifiPass" type="password" maxlength="63" autocomplete="off"></label></div><div class="actions"><button id="wifiConnect" class="primary">Подключить к сети</button></div><p class="caption">После подключения своя точка доступа вывески выключится: открывайте панель по адресу в офисной сети, он появится вверху. Точка доступа включается сама, если сеть пропала на минуту, или кнопкой на плате (держать 1 секунду) — на 10 минут.</p></form></section>
 <section class="card tabpanel" id="tabDevice" role="tabpanel" hidden><h3>Плата и экран</h3><p>ESP32-M075 V3.0, матрица GDEM075F53, контроллер JD79665CA. <code>SCK 18 · MOSI 23 · CS 27 · D/C 14 · RESET 12 · BUSY 13</code></p><label class="check"><input id="confirmHardware" type="checkbox"><span>Я сверил F53 и распиновку своей платы по README, сохранил заводской бэкап и готов включить обновление дисплея.</span></label><button id="enableHardware">Включить дисплей</button><h3 style="margin-top:20px">Питание</h3><p class="muted" id="powerStatus">Состояние неизвестно.</p><label class="check"><input id="batterySave" type="checkbox"><span>Экономия заряда — для работы от аккумулятора. Вывеска спит и выходит на связь раз в 15 минут и к событиям расписания. Панель доступна 3 минуты после нажатия кнопки на плате или 10 минут после «Разбудить» в CRM.</span></label><div class="actions"><button id="savePower">Сохранить</button><button id="stayAwake">Не засыпать 10 минут</button></div>
@@ -40,6 +41,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
 <h3 style="margin-top:20px">Обновление прошивки</h3><p class="muted" id="fwStatus">Версия неизвестна.</p><div class="actions"><label class="filebtn">Выбрать firmware.bin<input id="fwFile" type="file" accept=".bin,application/octet-stream"></label><button class="primary" id="fwUpload">Загрузить и перезапустить</button></div><progress id="fwProgress" max="1" value="0" hidden style="width:100%;margin-top:10px"></progress><p class="caption">Файл из <code>.pio\build\esp32-m075-v3\firmware.bin</code> после сборки. Новая версия первую минуту проверяется: если вывеска за это время перезагрузится, автоматически вернётся прежняя.</p>
 <h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
+<section class="card tabpanel" id="tabLog" role="tabpanel" hidden><div class="schedule-head"><div><h2>Журнал вывески</h2><p class="muted" style="margin:6px 0 0">Перезапуски и их причины, пропадания Wi‑Fi, ошибки связи с CRM, обновления экрана и прошивки. Последние 64 события хранятся в памяти вывески и не пропадают при перезагрузке и отключении питания; при связи с CRM они копируются в её журнал.</p></div><div class="actions"><button id="loadLog">Обновить</button><button id="downloadLog">Скачать .txt</button></div></div><p class="caption" id="logStatus" role="status">Журнал загрузится при открытии вкладки.</p><ol class="log" id="eventLog"></ol></section>
 </main><footer><span id="version">AviorSign</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
 <div id="feedback" class="toast" role="status" aria-live="polite" hidden></div>
 <script>
@@ -47,7 +49,9 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 const $=id=>document.getElementById(id),labels={open:'Открыто',closed:'Закрыто',soon:'Скоро буду',image:'Своё изображение',unknown:'неизвестно'},slots=['open','closed','soon','image'];
 const canvas=$('preview'),ctx=canvas.getContext('2d',{willReadFrequently:true});
 const work=document.createElement('canvas');work.width=800;work.height=480;const wctx=work.getContext('2d',{willReadFrequently:true});
-let qrRows=null,qrKey='',settingsShown=false,crmShown=false,powerShown=false,draftBytes=null;
+let qrRows=null,qrKey='',settingsShown=false,crmShown=false,powerShown=false,draftBytes=null,builtinsTried=false;
+// Built-in templates as the sign stores them (GET /builtin), and the square they keep for the QR code.
+const builtins={},QR_BOX={x:681,y:290,size:99};
 let selected='closed',key=sessionStorage.getItem('aviorKey')||'',state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
 // Saved frame per slot: Uint8Array, null when the device has none, undefined before the first check.
 const assets={};
@@ -60,20 +64,31 @@ async function api(path,method='GET',data){
  const r=await fetch('/api/v1/'+path,opts);if(!r.ok){let d;try{d=await r.json();}catch{}throw Error(d?.error||'Ошибка устройства: '+r.status);}return r;
 }
 async function run(fn){if(operation)return;operation=true;try{await fn();}catch(e){feedback(e.message,true);}finally{operation=false;}}
-// Approximates the firmware's built-in frame for a status without a saved picture.
+// The built-in frame of a status: the template from the sign, or a rough stand-in until it loads.
 function standard(c,s){
- c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle=s==='closed'?'#c41e23':s==='soon'?'#ffd500':'#000';c.fillRect(40,40,720,8);
- c.fillStyle='#000';c.textAlign='left';c.font='700 40px monospace';c.fillText('AVIOR',44,125);
- c.font='600 64px system-ui';c.fillText(labels[s],44,264,(qrRows&&state?.qrEnabled)?470:712);c.font='16px monospace';c.fillText('avior.local',44,425);
+ if(builtins[s])c.putImageData(frameImage(builtins[s]),0,0);
+ else{
+  c.fillStyle='#fff';c.fillRect(0,0,800,480);c.fillStyle='#000';c.textAlign='left';c.font='800 70px system-ui';c.fillText('AVIOR',80,95);
+  c.font='900 96px system-ui';c.fillText(labels[s].toUpperCase(),40,215,720);c.fillStyle='#c41e23';c.fillRect(130,237,535,50);
+ }
  drawQr(c,s,false);
 }
-// Same module matrix and placement as the firmware (GET /qr), so the preview matches the sign.
+// Same module matrix and square as the firmware (GET /qr), so the preview matches the sign.
+// A template carries its own caption; over a saved picture the sign adds a plate and caption.
 function drawQr(c,s,plate){
  if(!qrRows||!state?.qrEnabled)return;
- const n=qrRows.length,scale=Math.floor(220/n),px=n*scale,x0=760-px,y0=130;
- if(plate){c.fillStyle='#fff';c.fillRect(x0-14,y0-14,px+28,px+70);}c.fillStyle='#000';
- qrRows.forEach((row,y)=>{for(let x=0;x<n;x++)if(row[x]==='1')c.fillRect(x0+x*scale,y0+y*scale,scale,scale);});
- c.font='600 26px system-ui';c.textAlign='center';c.fillText(s==='open'?'Мы на связи':'Напишите нам',x0+px/2,y0+px+36);c.textAlign='left';
+ const n=qrRows.length,scale=Math.floor(QR_BOX.size/n),px=n*scale,x0=QR_BOX.x+Math.floor((QR_BOX.size-px)/2),y0=QR_BOX.y+Math.floor((QR_BOX.size-px)/2);
+ if(plate){
+  c.fillStyle='#fff';c.fillRect(QR_BOX.x-4,QR_BOX.y-4,QR_BOX.size+8,QR_BOX.size+30);
+  c.fillStyle='#000';c.font='15px monospace';c.textAlign='center';c.fillText('Связаться',QR_BOX.x+QR_BOX.size/2,QR_BOX.y+QR_BOX.size+16);c.textAlign='left';
+ }
+ c.fillStyle='#000';qrRows.forEach((row,y)=>{for(let x=0;x<n;x++)if(row[x]==='1')c.fillRect(x0+x*scale,y0+y*scale,scale,scale);});
+}
+async function loadBuiltins(){
+ if(builtinsTried)return;builtinsTried=true;
+ for(const s of ['open','closed','soon']){
+  try{const b=new Uint8Array(await(await api('builtin?slot='+s)).arrayBuffer());if(b.length===96000){builtins[s]=b;drawThumb(s);if(s===selected&&!draft&&!assets[s])showSelected();}}catch{}
+ }
 }
 async function loadQr(){
  try{const q=await(await api('qr')).json();qrRows=Array.isArray(q.rows)&&q.size>0&&q.rows.length===q.size?q.rows:null;}catch{qrRows=null;}
@@ -190,8 +205,29 @@ async function refresh(){
   if(!crmShown){$('crmEnabled').checked=!!crm.enabled;$('crmUrl').value=crm.url;crmShown=true;}
   $('crmStatus').textContent=!crm.enabled?'Связь с CRM выключена.':crm.error?'Ошибка связи с CRM: '+crm.error:crm.lastOkSeconds!==undefined?'На связи с CRM · '+crm.lastOkSeconds+' с назад.':crm.waiting?'Обмен с CRM не идёт: '+crm.waiting+'.':'Подключается к CRM…';
  }
- showClock();updateButtons();loadAssets();
+ showClock();updateButtons();loadAssets();loadBuiltins();
 }
+// Event log (GET /events), newest first. Faults: unexpected resets, Wi-Fi drops, CRM and refresh errors.
+let logData=null;
+const faultResets=[4,5,6,7,9],badKinds=['before_reset','render_abort','wifi_down','crm_error','refresh_fail','dropped'];
+function eventTime(e){
+ if(!e.timeValid)return '+'+e.time+' с от запуска';
+ const offset=Number($('timezone').value)||0;
+ return new Date((e.time+offset*60)*1000).toLocaleString('ru-RU',{timeZone:'UTC',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function eventClass(e){
+ if(e.kind==='boot')return faultResets.includes(e.code)?'boot bad':'boot';
+ return badKinds.includes(e.kind)||(e.kind==='battery'&&e.code<=15)?'bad':'';
+}
+function showLog(){
+ const list=$('eventLog');list.replaceChildren();
+ for(const e of logData.events){
+  const li=document.createElement('li'),t=document.createElement('time'),text=document.createElement('span');
+  t.textContent=eventTime(e);text.textContent=e.text;li.className=eventClass(e);li.append(t,text);list.append(li);
+ }
+ $('logStatus').textContent=logData.events.length?'Событий: '+logData.events.length+' из '+logData.capacity+', новые сверху. Время — '+offsetName(Number($('timezone').value)||0)+'.':'Событий пока нет.';
+}
+async function loadLog(){logData=await(await api('events')).json();showLog();}
 const days=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 function eventRow(e={day:1,minute:540,status:'open'}){
  const row=document.createElement('div');row.className='event';
@@ -293,8 +329,19 @@ $('fwUpload').onclick=()=>run(async()=>{
  }
  $('fwStatus').textContent='Вывеска пока не ответила. Обновите страницу через минуту.';
 });
+$('loadLog').onclick=()=>run(loadLog);
+// Oldest first in the file, so it reads in order; tab-separated for a spreadsheet.
+$('downloadLog').onclick=()=>run(async()=>{
+ await loadLog();
+ const lines=['AviorSign '+(state?.version||'')+' · журнал выгружен '+new Date().toLocaleString('ru-RU'),''].concat(logData.events.slice().reverse().map(e=>eventTime(e)+'\t'+e.kind+'\t'+e.text));
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\r\n')+'\r\n'],{type:'text/plain;charset=utf-8'}));
+ a.download='aviorsign-log-'+new Date().toISOString().slice(0,10)+'.txt';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
 $('disconnect').onclick=()=>{sessionStorage.removeItem('aviorKey');key='';state=null;$('login').hidden=false;$('connection').textContent='Устройство отключено';feedback('Ключ удалён из вкладки.');};
-document.querySelectorAll('[role=tab]').forEach(t=>t.addEventListener('click',()=>document.querySelectorAll('[role=tab]').forEach(x=>{const on=x===t;x.setAttribute('aria-selected',on);$(x.getAttribute('aria-controls')).hidden=!on;})));
+document.querySelectorAll('[role=tab]').forEach(t=>t.addEventListener('click',()=>{
+ document.querySelectorAll('[role=tab]').forEach(x=>{const on=x===t;x.setAttribute('aria-selected',on);$(x.getAttribute('aria-controls')).hidden=!on;});
+ if(t.getAttribute('aria-controls')==='tabLog'&&key)run(loadLog);
+}));
 slots.forEach(drawThumb);select(selected);
 if(key)run(async()=>{await refresh();await readSchedule();});
 setInterval(()=>{if(key&&!document.hidden&&!operation)refresh().catch(()=>{$('connection').textContent=state?.busy?'Экран обновляется · Wi‑Fi вернётся примерно через 25 с':'Связь потеряна · данные устарели';});},5000);
