@@ -17,8 +17,13 @@ disp_h = 112; disp_t = 1.4; disp_y = 9;          // flush with the board sides, 
 view_side = 2; view_top = 2; view_bottom = 10;   // glass edge to picture; the FPC side is wider
 comp_h = 6.0;                                    // tallest part on the back (battery connector)
 bat_w = 95; bat_h = 73; bat_t = 3.3;
-usb_x = 103;                                     // micro-USB centre (67 mm from the left seen from the back)
-btn_x = 67; btn_y = 5;                           // board button centre
+// Parts on the back of the board, along the bottom edge, measured from the left seen from the street
+// before the first test print. The test print showed USB and button swapped, so the whole
+// back-of-board layout (USB, button, battery bay, posts) is mirrored with layout_flip.
+layout_flip = true;
+function fx(x) = layout_flip ? board_w - x : x;
+usb_x = fx(103);                                 // micro-USB centre
+btn_x = fx(67); btn_y = 5;                       // board button centre
 // --- assumed: check before printing
 tape_t = 0.2;        // double-sided tape between display and board
 usb_up = 1.5;        // micro-USB centre above the board
@@ -56,7 +61,9 @@ module front() {
 
 module back() {
   lip_t = 1.2; lip_off = 0.3; lip_d = 2.0;
-  key = [59, 1, 81, 9];                     // flexible key over the button, hinge on the right
+  // Flexible key over the button: free end 8 mm on one side of it, hinge 14 mm on the other.
+  kf = fx(67 - 8); kh = fx(67 + 14);
+  key = [min(kf, kh), 1, max(kf, kh), 9];
   difference() {
     union() {
       rounded(1.5, z_in, z_in + back_t);
@@ -67,16 +74,20 @@ module back() {
         box(45, cav[1] - 1, 125, cav[1] + 5, z_in - lip_d - 1, z_in + 1);
       }
       // Posts pressing the board onto the front strips, where the back of the board is empty.
-      for (p = [[8, 40], [8, 100], [55, 75], [55, 110]]) translate([p[0], p[1], z_back + 0.1]) cylinder(d = 4, h = z_in - z_back, $fn = 24);
+      for (p = [[8, 40], [8, 100], [55, 75], [55, 110]]) translate([fx(p[0]), p[1], z_back + 0.1]) cylinder(d = 4, h = z_in - z_back, $fn = 24);
       // Battery bay: side walls and three ribs holding it down; open at the bottom for the wires.
-      for (x = [66.8, 166]) box(x, 62, x + 1.2, 128, z_back + 1, z_in + 0.01);
-      for (x = [92, 117, 142]) box(x - 0.8, 64, x + 0.8, 124, z_back + bat_t + 0.3, z_in + 0.01);
+      for (x = [67.4, 166.6]) box(fx(x) - 0.6, 62, fx(x) + 0.6, 128, z_back + 1, z_in + 0.01);
+      for (x = [92, 117, 142]) box(fx(x) - 0.8, 64, fx(x) + 0.8, 124, z_back + bat_t + 0.3, z_in + 0.01);
       // Key post over the button.
       translate([btn_x, btn_y, z_back + btn_h + 0.3]) cylinder(d = 4, h = z_in - z_back - btn_h, $fn = 24);
     }
     for (s = screws) translate([s[0], s[1], z_in - 1]) cylinder(d = screw_hole, h = back_t + 2, $fn = 24);
     // U-shaped slot around the key.
-    for (b = [[key[0] - 0.8, key[1] - 0.8, key[2], key[1]], [key[0] - 0.8, key[3], key[2], key[3] + 0.8], [key[0] - 0.8, key[1] - 0.8, key[0], key[3] + 0.8]])
+    // U-shaped slot around the key, open on the hinge side.
+    fl = kf < kh;   // free end on the left
+    sx0 = fl ? key[0] - 0.8 : key[0]; sx1 = fl ? key[2] : key[2] + 0.8;
+    for (b = [[sx0, key[1] - 0.8, sx1, key[1]], [sx0, key[3], sx1, key[3] + 0.8],
+              fl ? [key[0] - 0.8, key[1] - 0.8, key[0], key[3] + 0.8] : [key[2], key[1] - 0.8, key[2] + 0.8, key[3] + 0.8]])
       box(b[0], b[1], b[2], b[3], z_in - 1, z_in + back_t + 1);
   }
 }
@@ -84,7 +95,7 @@ module back() {
 module board_and_display() {
   color("royalblue") box(0, 0, board_w, board_h, z_board, z_back);
   color("whitesmoke") box(0, disp_y, board_w, disp_y + disp_h, front_t, front_t + disp_t);
-  color("gold") box(68.5, 57, 68.5 + bat_w, 57 + bat_h, z_back, z_back + bat_t);
+  color("gold") box(min(fx(68.5), fx(68.5 + bat_w)), 57, max(fx(68.5), fx(68.5 + bat_w)), 57 + bat_h, z_back, z_back + bat_t);
   color("silver") box(usb_x - 4, -0.5, usb_x + 4, 5, z_back, z_back + 2.6);
   color("red") translate([btn_x, btn_y, z_back]) cylinder(d = 3.5, h = btn_h, $fn = 16);
 }
