@@ -26,7 +26,8 @@ usb_x = fx(103);                                 // micro-USB centre
 btn_x = fx(67); btn_y = 5;                       // board button centre
 // --- assumed: check before printing
 tape_t = 0.2;        // double-sided tape between display and board
-usb_up = 1.5;        // micro-USB centre above the board
+usb_up = 1.6;        // USB-C centre above the board (the owner replaced the micro-USB with USB-C)
+usb_w = 13.5; usb_h = 7.5;   // opening for the USB-C plug body, rounded like the plug
 btn_h = 5.0;         // button height above the board (the key works for 3.5 to 5 mm)
 // --- case
 front_t = 1.6; back_t = 1.6; wall = 4.0; gap = 0.4; gap_bottom = 1.0; clear = comp_h + 1;
@@ -52,7 +53,8 @@ module front() {
     box(cav[0], cav[1], cav[2], cav[3], front_t, z_in + 1);
     box(win[0], win[1], win[2], win[3], -1, front_t + 1);                    // display window
     for (s = screws) translate([s[0], s[1], z_in - 9]) cylinder(d = pilot, h = 10, $fn = 24);
-    box(usb_x - 6, out[1] - 1, usb_x + 6, cav[1] + 1, z_back + usb_up - 3.75, z_back + usb_up + 3.75); // USB plug
+    translate([usb_x, cav[1] + 1, z_back + usb_up]) rotate([90, 0, 0])                      // USB-C plug
+      linear_extrude(wall + gap_bottom + 3) offset(usb_h / 2 - 0.01, $fn = 48) square([usb_w - usb_h + 0.02, 0.02], center = true);
   }
   // The board rests on these strips along its margins (no display there); the FPC passes in the middle below.
   box(3, disp_y + disp_h + 0.8, board_w - 3, board_h - 0.5, front_t - 0.01, z_board);
