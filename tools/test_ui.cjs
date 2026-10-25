@@ -35,7 +35,7 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
        {seq:2,time:12,timeValid:false,boot:2,kind:'boot',code:9,text:'Запуск 0.4.0 · просадка питания (brownout)'},
        {seq:1,time:1792500000,timeValid:true,boot:1,kind:'refresh',code:0,text:'Экран обновлён: «Открыто» за 24,8 с'}]})};
      if(url.endsWith('/qr'))return {ok:true,status:200,json:async()=>device.qrEnabled?{enabled:true,size:3,rows:['101','010','101']}:{enabled:false,size:3,rows:['101','010','101']}};
-     if(url.endsWith('/power'))Object.assign(device,{batterySave:data.batterySave,awakeSeconds:60});
+     if(url.endsWith('/power'))Object.assign(device,{batterySave:data.batterySave&&!data.auto,powerAuto:data.auto,powerManual:data.batterySave,awakeSeconds:60});
      if(url.endsWith('/crm'))device.crm={enabled:data.enabled,url:data.url,configured:device.crm.configured||!!data.token,error:'',lastOkSeconds:data.enabled?3:undefined};
      if(url.endsWith('/settings'))Object.assign(device,{qrEnabled:data.qrEnabled,qrUrl:data.qrUrl});
      if(url.endsWith('/status'))Object.assign(device,{desired:data.status,displayed:data.status,automatic:false});
@@ -86,7 +86,9 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  device.crm.error='CRM ответила 401: Неверный токен';await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/401/);
  device.crm={enabled:true,url:'https://cms.avior.moscow',configured:true,error:'',waiting:'ещё нет точного времени из интернета (нужно для HTTPS)'};await w.refresh();assert.match(d.getElementById('crmStatus').textContent,/не идёт: ещё нет точного времени/);
  assert.match(d.getElementById('powerStatus').textContent,/Экономия выключена/);assert.match(d.getElementById('powerStatus').textContent,/AviorSign-1a2b: выключена/);
- d.getElementById('batterySave').checked=true;await click('savePower');await tick();assert.equal(device.batterySave,true);assert.match(d.getElementById('powerStatus').textContent,/уснёт через 60 с/);
+ d.getElementById('powerMode').value='on';await click('savePower');await tick();assert.equal(device.batterySave,true);assert.match(d.getElementById('powerStatus').textContent,/уснёт через 60 с/);
+ d.getElementById('powerMode').value='auto';await click('savePower');await tick();const powerBody=JSON.parse(requests.findLast(r=>r.url.endsWith('/power')).opts.body);
+ assert.equal(powerBody.auto,true);assert.equal(powerBody.batterySave,false);assert.match(d.getElementById('powerStatus').textContent,/^Автоматический режим/);
  await click('stayAwake');assert(requests.some(r=>r.url.endsWith('/awake')&&r.opts.method==='POST'));
  await click('sleepTest');assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/sleeptest')).opts.body).seconds,180);
  d.querySelector('[data-status="open"]').click();await tick();

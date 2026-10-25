@@ -125,7 +125,9 @@ int pendingJob=-1;uint32_t pendingSince=0,refreshStartedAt=0;int refreshBatteryM
 // only button is GPIO0, a boot strap, and a deep-sleep wake while it is held would start
 // the ROM download mode instead of the firmware.
 constexpr uint32_t POWER_WAKE_MINUTES=15,BUTTON_AWAKE_MS=180000,TIMER_AWAKE_MS=60000,REQUEST_AWAKE_MS=600000;
-bool powerSave=false,sessionWake=true,crmDoneThisWake=false;uint32_t awakeUntil=0;const char* wakeReason="boot";
+// Battery mode is either set by hand (powerManual) or follows the power source (powerAuto):
+// off on USB or while the source is not known yet, on when running from the battery.
+bool powerSave=false,powerManual=false,powerAuto=true,sessionWake=true,crmDoneThisWake=false;uint32_t awakeUntil=0;const char* wakeReason="boot";
 uint32_t sleepTestAt=0,sleepTestSeconds=0,wokeAt=0;bool timeSyncWanted=false;
 volatile uint32_t ntpSyncedAt=0;
 void onTimeSync(struct timeval*){ntpSyncedAt=millis();}
@@ -158,13 +160,16 @@ bool makeQr(const String& text){
 const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
 bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
 uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
-const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake"};
-constexpr int CRM_ITEM_COUNT=9;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery"};
+constexpr int CRM_ITEM_COUNT=10;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 uint32_t crmEventsAck=0; // last event-log seq the CRM confirmed it stored
 Preferences crmPrefs;
 const char* crmWaitReason();
-int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0;
+int adcMv[ADC_PROBE_COUNT]={0};int batteryPin=-1,batteryMv=0,batteryRawMv=0;
+// Battery calibration from the CRM (battery.h): voltage correction and the sign's own curve.
+int batteryScale=1000;int16_t batteryCurve[CURVE_POINTS];bool batteryCurveSet=false;
+int percentNow(){return batteryCurveSet?curvePercent(batteryCurve,batteryRawMv):batteryPercent(batteryMv);}
 // Skipped during a refresh: the panel load would read as a discharged battery.
 void sampleBattery(){
   if(rendering)return;
@@ -173,13 +178,13 @@ void sampleBattery(){
     uint32_t sum=0;for(int k=0;k<8;k++)sum+=analogReadMilliVolts(ADC_PROBE_PINS[i]);adcMv[i]=sum/8;
     if(plausibleBattery(adcMv[i])&&adcMv[i]>best){best=adcMv[i];batteryPin=ADC_PROBE_PINS[i];}
   }
-  batteryMv=best*BATTERY_DIVIDER;
+  batteryRawMv=best*BATTERY_DIVIDER;batteryMv=batteryRawMv*batteryScale/1000;
 }
 // Low battery for the event log: going down past 15 % and 5 %, and back above 25 %.
 uint8_t batteryLevel=0;
 void trackBattery(){
   if(batteryPin<0||rendering)return;
-  int p=batteryPercent(batteryMv);uint8_t level=p<=5?2:p<=15?1:0;
+  int p=percentNow();uint8_t level=p<=5?2:p<=15?1:0;
   if(level>batteryLevel||(batteryLevel&&p>=25)){batteryLevel=level;logEvent(EV_BATTERY,p,batteryMv);}
 }
 // Refreshed every 5 s in RTC memory, which keeps its content through a reset but not
@@ -222,16 +227,18 @@ void trackWifi(){
 }
 // Charging for the panel, the CRM and the log (inferred from the voltage, battery.h). Samples
 // near a refresh, a wake or a radio start are skipped: the load change would look like USB.
-ChargeTracker charge;uint32_t chargeSince=0;
+ChargeTracker charge;uint32_t chargeSince=0;int chargeSamples=0; // trusted samples since the last wake
+void applyPower(int source);
 void trackCharge(){
   if(batteryPin<0||rendering||radioPaused)return;
   if((lastRefresh&&millis()-lastRefresh<30000)||millis()-wokeAt<20000||millis()-radioOnAt<20000)return;
-  ChargeState before=charge.state,now=charge.update(millis(),batteryMv);
+  ChargeState before=charge.state,now=charge.update(millis(),batteryRawMv);chargeSamples++;
   if(now==before)return;
   if(now==CHARGE_ON)chargeSince=millis();
   if(before!=CHARGE_UNKNOWN||now!=CHARGE_OFF) // the first estimate after boot is no event
     logEvent(EV_CHARGE,now,batteryMv,now==CHARGE_FULL&&chargeSince?(millis()-chargeSince)/1000:0);
   if(now==CHARGE_OFF)chargeSince=0;
+  applyPower(2);
 }
 uint32_t scanStarted=0;
 struct WifiSnapshot {
@@ -316,7 +323,7 @@ void worker(void*) {
     if(ok){
       Serial.printf("[display] start status=%s\n",keys[s]);renderPhase(PHASE_START);
       Panel panel;panel.phase=renderPhase;
-      ComposeInput in{s,qrEnabled?&qr:nullptr,batteryPin>=0&&batteryPercent(batteryMv)<=15};
+      ComposeInput in{s,qrEnabled?&qr:nullptr,batteryPin>=0&&percentNow()<=15};
       ok=panel.show(band,[&](uint8_t* buf,int b){readOk&=composeRows(buf,b*BAND_ROWS,BAND_ROWS,in,loaded?&asset:(File*)nullptr);})&&readOk;
       renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d\n",ok);
     }
@@ -383,7 +390,7 @@ void state(){
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["otaPending"]=otaPending;d["qrEnabled"]=qrEnabled;d["qrUrl"]=qrUrl;
   d["accessPoint"]=WiFi.getMode()==WIFI_AP_STA||WiFi.getMode()==WIFI_AP;d["apName"]=apName();
-  d["batterySave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
+  d["batterySave"]=powerSave;d["powerAuto"]=powerAuto;d["powerManual"]=powerManual;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
    if(const char* wait=crmWaitReason())c["waiting"]=wait;
@@ -392,7 +399,8 @@ void state(){
   {auto l=d["log"].to<JsonObject>();l["next"]=logNext;l["boot"]=bootCount;nvs_stats_t st;
    if(nvs_get_stats(nullptr,&st)==ESP_OK){l["nvsUsed"]=st.used_entries;l["nvsFree"]=st.free_entries;}}
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
-  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;b["charge"]=chargeName(charge.state);}
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["raw"]=batteryRawMv;b["percent"]=percentNow();b["divider"]=BATTERY_DIVIDER;b["charge"]=chargeName(charge.state);
+    b["scale"]=batteryScale;b["curve"]=batteryCurveSet;}
   auto probe=d["adcProbe"].to<JsonObject>();for(int i=0;i<ADC_PROBE_COUNT;i++)probe[String(ADC_PROBE_PINS[i])]=adcMv[i];
   d["cooldownSeconds"]=lastRefresh&&millis()-lastRefresh<60000?(60000-(millis()-lastRefresh))/1000:0;
   auto assets=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)assets[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));reply(200,d);
@@ -420,9 +428,9 @@ String crmReport(){
   d["uptimeSeconds"]=millis()/1000;d["resetReason"]=resetName(bootReason);d["heap"]=ESP.getFreeHeap();d["otaPending"]=otaPending;
   d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"";d["rssi"]=WiFi.RSSI();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
-  d["powerSave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
+  d["powerSave"]=powerSave;d["powerAuto"]=powerAuto;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
-  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["charge"]=chargeName(charge.state);}
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["raw"]=batteryRawMv;b["percent"]=percentNow();b["charge"]=chargeName(charge.state);b["scale"]=batteryScale;b["curve"]=batteryCurveSet;}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
   auto a=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)a[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));
@@ -455,10 +463,24 @@ bool crmDownload(int slot){
   if(written!=(int)FRAME_BYTES||!LittleFS.rename("/crm.tmp",assetPath(slot))){LittleFS.remove("/crm.tmp");crmError="Картинка из CRM не сохранилась";return false;}
   return true;
 }
-void setPowerSave(bool on,bool fromCrm){
+// source: 0 panel, 1 CRM, 2 automatic (power source changed).
+void applyPower(int source){
+  bool on=!RECOVERY_MODE&&(powerAuto?charge.state==CHARGE_OFF:powerManual);
   if(on==powerSave)return;
-  powerSave=on;prefs.putBool("power",on);sessionWake=true;stayAwake(60000);
-  logEvent(EV_POWER,on,fromCrm);
+  powerSave=on;sessionWake=true;stayAwake(60000);
+  logEvent(EV_POWER,on,source);
+}
+void setPowerMode(bool autoMode,bool manualOn,int source){
+  powerAuto=autoMode;powerManual=manualOn;prefs.putBool("powerAuto",autoMode);prefs.putBool("power",manualOn);
+  applyPower(source);
+}
+bool setBatteryCalibration(int scale,const int16_t* curve,bool persist=true){
+  if(!validScale(scale)||(curve&&!validCurve(curve)))return false;
+  batteryScale=scale;batteryCurveSet=curve!=nullptr;if(curve)memcpy(batteryCurve,curve,sizeof batteryCurve);
+  if(persist){prefs.putInt("batScale",scale);if(curve)prefs.putBytes("batCurve",batteryCurve,sizeof batteryCurve);else prefs.remove("batCurve");}
+  batteryMv=batteryRawMv*batteryScale/1000;
+  Serial.printf("[battery] calibration scale=%d curve=%d\n",scale,batteryCurveSet);
+  return true;
 }
 // Applies what the CRM changed since the last applied seq; returns true when something changed.
 bool crmApply(JsonDocument& r){
@@ -496,7 +518,15 @@ bool crmApply(JsonDocument& r){
   };
   if(statusSeq<scheduleSeq){applyStatus();applySchedule();}else{applySchedule();applyStatus();}
   seq=r["power"]["seq"]|0;
-  if(seq>crmApplied[7]){setPowerSave(r["power"]["enabled"]|false,true);crmMarkApplied(7,seq);}
+  if(seq>crmApplied[7]){setPowerMode(r["power"]["auto"]|false,r["power"]["enabled"]|false,1);crmMarkApplied(7,seq);}
+  // Battery calibration measured in the CRM: voltage correction and the discharge curve.
+  seq=r["battery"]["seq"]|0;
+  if(seq>crmApplied[9]){
+    int16_t curve[CURVE_POINTS];JsonArrayConst a=r["battery"]["curve"].as<JsonArrayConst>();bool hasCurve=a.size()==CURVE_POINTS;
+    for(int i=0;hasCurve&&i<CURVE_POINTS;i++)curve[i]=a[i]|0;
+    if(!setBatteryCalibration(r["battery"]["scale"]|1000,hasCurve?curve:nullptr))crmError="Калибровка аккумулятора из CRM не прошла проверку";
+    crmMarkApplied(9,seq);
+  }
   // «Разбудить» from the CRM: stay reachable for 10 minutes from this check on.
   seq=r["wake"]["seq"]|0;
   if(seq>crmApplied[8]){
@@ -579,7 +609,7 @@ uint32_t secondsToWake(){
 // The radio comes on only when needed: the button, the CRM check, or an hourly time sync
 // that keeps the schedule accurate while the sleep clock drifts.
 void afterWake(bool button,const char* reason){
-  wokeAt=millis();wakeReason=button?"button":reason;sessionWake=button;crmLastTry=0;
+  wokeAt=millis();chargeSamples=0;wakeReason=button?"button":reason;sessionWake=button;crmLastTry=0;
   awakeUntil=millis()+(button?BUTTON_AWAKE_MS:TIMER_AWAKE_MS);
   bool crmOn=crmEnabled&&crmToken.length();
   timeSyncWanted=!ntpSyncedAt||millis()-ntpSyncedAt>3600000UL;crmDoneThisWake=!crmOn;
@@ -595,8 +625,9 @@ void powerSaveStep(){
   bool window=(int32_t)(millis()-awakeUntil)<0;
   bool busy=rendering||pendingJob>=0||otaBusy||restartAt||scanActive||radioPaused;
   bool netPending=!crmDoneThisWake||(timeSyncWanted&&(int32_t)(ntpSyncedAt-wokeAt)<0);
+  bool sampling=powerAuto&&batteryPin>=0&&chargeSamples<3; // auto mode: notice USB plugged in while asleep
   if(busy)return;
-  if(window&&(sessionWake||netPending||refreshDue()))return;
+  if(window&&(sessionWake||netPending||sampling||refreshDue()))return;
   if(!window&&refreshDue()&&(uint32_t)(millis()-awakeUntil)<120000)return; // the 60 s refresh cooldown
   afterWake(lightSleep(secondsToWake()),"timer");
 }
@@ -745,7 +776,7 @@ void routes(){
   web.on("/api/v1/power",HTTP_PUT,[]{
     if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
     if(!d["batterySave"].is<bool>()){error(400,"Требуется batterySave");return;}
-    setPowerSave(d["batterySave"],false);state();
+    setPowerMode(d["auto"]|false,d["batterySave"],0);state();
   });
   web.on("/api/v1/awake",HTTP_POST,[]{
     if(!auth())return;stayAwake(REQUEST_AWAKE_MS);state();
@@ -862,7 +893,12 @@ void setup(){
   Serial.println("[boot] phase=wifi");Serial.flush();
   if(!RECOVERY_MODE){ssid=prefs.getString("ssid","");wifiPassword=prefs.getString("wifi","");}
   // After power-on or reset the panel stays reachable for a while even in battery mode.
-  powerSave=!RECOVERY_MODE&&prefs.getBool("power",false);sessionWake=true;awakeUntil=millis()+BUTTON_AWAKE_MS;
+  powerManual=prefs.getBool("power",false);powerAuto=prefs.getBool("powerAuto",true);
+  powerSave=!RECOVERY_MODE&&!powerAuto&&powerManual;sessionWake=true;
+  {int scale=prefs.getInt("batScale",1000);int16_t curve[CURVE_POINTS];
+   bool hasCurve=prefs.isKey("batCurve")&&prefs.getBytes("batCurve",curve,sizeof curve)==sizeof curve;
+   if(!setBatteryCalibration(scale,hasCurve?curve:nullptr,false))setBatteryCalibration(1000,nullptr,false);}
+  awakeUntil=millis()+BUTTON_AWAKE_MS;
   pinMode(0,INPUT_PULLUP); // board button: BOOT strap at reset, setup button afterwards
   WiFi.onEvent(onWifiDisconnect,ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   bool apOK=startRadio();
@@ -904,7 +940,7 @@ void loop(){
   if(!crmWaitReason()&&millis()-crmLastTry>=crmIntervalMs)crmSync();
   if(millis()-lastHealth>=5000){
     lastHealth=millis();sampleBattery();trackBattery();trackCharge();takeSnapshot();
-    Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?batteryPercent(batteryMv):-1);
+    Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?percentNow():-1);
     for(int i=0;i<ADC_PROBE_COUNT;i++)Serial.printf(" %d:%d",ADC_PROBE_PINS[i],adcMv[i]);Serial.println();
     WifiSnapshot wifi=wifiSnapshot();
     Serial.printf("[health] mode=%s uptime_s=%lu heap=%u min_heap=%u clients=%u wifi=%s arduino_wifi=%d ip=%s associated=%d netif_up=%d reset=%s(%d)\n",MODE_NAME,(unsigned long)(millis()/1000),ESP.getFreeHeap(),esp_get_minimum_free_heap_size(),WiFi.softAPgetStationNum(),stationStateName(wifi.state()),wifi.evidence.arduinoStatus,wifi.state()==StationState::Connected?wifi.address.toString().c_str():"0.0.0.0",wifi.evidence.associated,wifi.evidence.interfaceUp,resetName(bootReason),(int)bootReason);

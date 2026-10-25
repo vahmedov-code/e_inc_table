@@ -67,3 +67,19 @@ struct ChargeTracker {
     return state;
   }
 };
+
+// The sign's own discharge curve, measured by the CRM from a full cycle: the raw reading
+// (before the voltage correction) at 0, 10, ... 100 % of the time the battery lasted.
+constexpr int CURVE_POINTS=11;
+inline bool validCurve(const int16_t* at){
+  if(at[0]<2800||at[CURVE_POINTS-1]>4400)return false;
+  for(int i=1;i<CURVE_POINTS;i++)if(at[i]<=at[i-1])return false;
+  return true;
+}
+inline int curvePercent(const int16_t* at,int mv){
+  if(mv<=at[0])return 0;
+  for(int i=1;i<CURVE_POINTS;i++)if(mv<=at[i])return (i-1)*10+10*(mv-at[i-1])/(at[i]-at[i-1]);
+  return 100;
+}
+// Voltage correction from a multimeter reading, in thousandths (1000 = none).
+constexpr bool validScale(int s){return s>=900&&s<=1100;}

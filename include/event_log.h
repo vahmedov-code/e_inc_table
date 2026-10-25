@@ -192,7 +192,7 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
     case EV_BATTERY:
       appendf(out,size,e.code<=15?"Низкий заряд: %d %%":"Заряд восстановился: %d %%",e.code);volts(e.value);break;
     case EV_POWER:
-      appendf(out,size,"Экономия заряда %s (%s)",e.code?"включена":"выключена",e.value?"из CRM":"из панели");break;
+      appendf(out,size,"Экономия заряда %s (%s)",e.code?"включена":"выключена",e.value==2?(e.code?"автоматически: работа от аккумулятора":"автоматически: питание от USB"):e.value?"из CRM":"из панели");break;
     case EV_CHARGE: // code: ChargeState (battery.h), value: mV, extra: seconds of charging
       if(e.code==2)appendf(out,size,"Идёт зарядка от USB");
       else if(e.code==3){appendf(out,size,"Аккумулятор заряжен");if(e.extra>0){durationText(e.extra,a,sizeof a);appendf(out,size," за %s",a);}}

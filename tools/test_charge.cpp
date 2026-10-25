@@ -22,5 +22,10 @@ int main(){
   {Sim s;s.run(700,3800,3790);assert(s.t.state==CHARGE_OFF);
    assert(s.run(1800,3790,3770,40)==CHARGE_OFF);}               // discharging with dips is never charging
   {int a[]={5,1,3},b[]={1,1,9},c[]={9,9,1};assert(ChargeTracker::median3(a)==3&&ChargeTracker::median3(b)==1&&ChargeTracker::median3(c)==9);}
-  puts("Charge detection: PASS");
+  // Own discharge curve from the CRM: raw mV at 0, 10, ... 100 %.
+  {int16_t c[CURVE_POINTS]={3480,3620,3680,3720,3760,3800,3850,3910,3980,4070,4190};
+   assert(validCurve(c)&&curvePercent(c,3400)==0&&curvePercent(c,4250)==100&&curvePercent(c,3800)==50&&curvePercent(c,3830)==56);
+   c[5]=3760;assert(!validCurve(c));c[5]=3800;c[0]=2500;assert(!validCurve(c));}
+  assert(validScale(1000)&&validScale(988)&&!validScale(850)&&!validScale(1200));
+  puts("Charge detection and battery calibration: PASS");
 }

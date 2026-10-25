@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.2: automatic battery mode and battery calibration
+
+Owner request: battery mode off on USB, on from the battery, and a tool to calibrate the percentage. Battery mode follows `ChargeTracker` in auto mode (default). The CRM keeps a battery history (a point every 10 minutes and on every charge change), draws it, corrects the voltage from a multimeter reading and builds the sign's own discharge curve from the last full cycle (time fraction as charge fraction, median of 5 points, strictly ascending). Checked against a local MariaDB with a synthetic 20-day cycle: curve, voltage correction, auto mode and the commands in the sync answer. `tools/test_charge.cpp` covers the curve and the limits. Not yet run on the board.
+
 ## Update 0.4.1: charging indication
 
 Owner readings on 0.4.0 with a full battery: on USB GPIO33 2125 mV (4.25 V), without USB 2101 mV (4.20 V); GPIO32 631/635 and GPIO34 322/301 mV, i.e. no charger status reaches an ADC input. Charging is therefore inferred from the battery voltage (`ChargeTracker`). `tools/test_charge.cpp` simulates plugging, charging with Wi-Fi dips, the full plateau, unplugging, a boot on USB, plugging during sleep and discharging with dips. Not yet seen on the board: the size of the step while charging a part-empty battery, false steps from load changes. A charger status wire (CHRG/STDBY) to a free input would make it exact.
