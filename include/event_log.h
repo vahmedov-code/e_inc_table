@@ -38,7 +38,7 @@ enum : uint8_t {AP_NO_NETWORK=0,AP_NETWORK_LOST,AP_BUTTON,AP_NETWORK_BACK};
 // EV_CRM_ERROR kinds (extra): a failed HTTP exchange, an unreadable answer, a bad address.
 enum : uint8_t {CRM_FAIL_HTTP=0,CRM_FAIL_ANSWER,CRM_FAIL_ADDRESS};
 // EV_OTA steps (code).
-enum : uint8_t {OTA_RECEIVED=0,OTA_INSTALLED,OTA_ROLLED_BACK,OTA_CONFIRMED};
+enum : uint8_t {OTA_RECEIVED=0,OTA_INSTALLED,OTA_ROLLED_BACK,OTA_CONFIRMED,OTA_FAILED,OTA_REVERTED};
 
 // "0.4.0" -> 400, so a version fits a record field.
 inline int32_t versionNumber(const char* v){int a=0,b=0,c=0;sscanf(v,"%d.%d.%d",&a,&b,&c);return a*10000+b*100+c;}
@@ -184,7 +184,9 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
       break;
     case EV_OTA:
       version(e.value,a,sizeof a);version(e.extra,b,sizeof b);
-      if(e.code==OTA_RECEIVED)appendf(out,size,"Получена прошивка, %d КБ — перезапуск",(int)(e.value/1024));
+      if(e.code==OTA_RECEIVED)appendf(out,size,e.extra==1?"Скачана прошивка из CRM, %d КБ — перезапуск":"Получена прошивка, %d КБ — перезапуск",(int)(e.value/1024));
+      else if(e.code==OTA_FAILED)appendf(out,size,"Прошивка из CRM не скачалась после 3 попыток");
+      else if(e.code==OTA_REVERTED)appendf(out,size,e.extra==1?"Прошивка %s не вышла на связь с CRM за 10 минут — возврат к прежней":"Прошивка %s перезапускалась без остановки — возврат к прежней",a);
       else if(e.code==OTA_INSTALLED)appendf(out,size,"Установлена прошивка %s (была %s)",a,b);
       else if(e.code==OTA_ROLLED_BACK)appendf(out,size,"Новая прошивка не запустилась — работает прежняя %s",a);
       else appendf(out,size,"Прошивка %s проработала минуту и закреплена",a);

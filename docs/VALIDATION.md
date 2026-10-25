@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.3: firmware from the CRM
+
+The CRM side was run against a local MariaDB and PHP in a real browser: a 0.4.2 file without the version marker is refused, the 0.4.3 file is uploaded in three 512 KB parts, stored with its SHA-256, offered in the sync answer and served by `api/sign/firmware.php` byte for byte with Content-Length; a stale seq gets 404. The firmware side (download, SHA-256, trial and return to the previous image) compiles but has not run on the board: the first CRM update should be watched in the journal.
+
 ## Update 0.4.2: automatic battery mode and battery calibration
 
 Owner request: battery mode off on USB, on from the battery, and a tool to calibrate the percentage. Battery mode follows `ChargeTracker` in auto mode (default). The CRM keeps a battery history (a point every 10 minutes and on every charge change), draws it, corrects the voltage from a multimeter reading and builds the sign's own discharge curve from the last full cycle (time fraction as charge fraction, median of 5 points, strictly ascending). Checked against a local MariaDB with a synthetic 20-day cycle: curve, voltage correction, auto mode and the commands in the sync answer. `tools/test_charge.cpp` covers the curve and the limits. Not yet run on the board.

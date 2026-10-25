@@ -18,6 +18,7 @@
 #include <esp_sntp.h>
 #include <nvs.h>
 #include <algorithm>
+#include <mbedtls/sha256.h>
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -107,6 +108,21 @@ void logTick(){
   }
   for(int c=0;c<LOG_CHUNKS;c++)if(dirty[c])logSaveChunk(c);
 }
+bool trial=false,trialCrm=false; // running a new image that is not confirmed yet (see TRIAL_CRM_MS)
+void startTrial(bool fromCrm){
+  const esp_partition_t* running=esp_ota_get_running_partition();const esp_partition_t* next=esp_ota_get_boot_partition();
+  if(!logReady||!running||!next||next==running)return;
+  logPrefs.putUInt("trialPrev",running->address);logPrefs.putUChar("trialBoots",0);logPrefs.putBool("trialCrm",fromCrm);
+  logPrefs.putUInt("otaTo",next->address);logPrefs.putUInt("otaFrom",versionNumber(FW_VERSION));
+}
+void endTrial(){trial=false;logPrefs.remove("trialPrev");logPrefs.remove("trialBoots");logPrefs.remove("trialCrm");}
+// Boots the previous image; its boot logs the failed update (otaTo still names this one).
+void revertTrial(bool crm){
+  const esp_partition_t* prev=esp_ota_get_next_update_partition(nullptr);
+  logEvent(EV_OTA,OTA_REVERTED,versionNumber(FW_VERSION),crm);
+  if(prev&&prev->address==logPrefs.getUInt("trialPrev",0)&&esp_ota_set_boot_partition(prev)==ESP_OK){endTrial();Serial.flush();ESP.restart();}
+  Serial.println("[ota] previous image not bootable, keeping this one");endTrial();
+}
 void eventJson(JsonObject o,uint32_t seq,const LogRecord& e){
   char text[200];eventText(e,text,sizeof text);
   o["seq"]=seq;o["time"]=e.time;o["timeValid"]=e.time>=LOG_VALID_TIME;o["boot"]=e.boot;o["kind"]=eventKindName(e.kind);
@@ -142,6 +158,11 @@ uint32_t apUntil=0,staLostAt=0,buttonDownAt=0;
 extern "C" bool verifyRollbackLater(){return true;}
 constexpr uint32_t OTA_CONFIRM_MS=60000;
 bool otaPending=false,otaOK=false;std::atomic<bool> otaBusy(false);String otaError;size_t otaBytes=0;uint32_t restartAt=0;
+extern "C" const char FW_MARKER[]=AVIOR_FW_MARKER; // printed at boot, so the linker keeps it in the image
+// Trial of a new image, on top of the bootloader's rollback (which the factory bootloader
+// may lack): an image that resets three times before it is confirmed, or a CRM-installed
+// image that cannot reach the CRM in 10 minutes, switches back to the previous one itself.
+constexpr uint32_t TRIAL_CRM_MS=600000;
 const char* DEFAULT_QR_URL="https://avior.moscow/na-svyazi/";
 bool qrEnabled=true;String qrUrl=DEFAULT_QR_URL;QrMatrix qr;
 QrMatrix* qrOut=nullptr;
@@ -160,8 +181,8 @@ bool makeQr(const String& text){
 const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
 bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
 uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
-const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery"};
-constexpr int CRM_ITEM_COUNT=10;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery","firmware"};
+constexpr int CRM_ITEM_COUNT=11;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 uint32_t crmEventsAck=0; // last event-log seq the CRM confirmed it stored
 Preferences crmPrefs;
@@ -428,10 +449,11 @@ String crmReport(){
   d["uptimeSeconds"]=millis()/1000;d["resetReason"]=resetName(bootReason);d["heap"]=ESP.getFreeHeap();d["otaPending"]=otaPending;
   d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"";d["rssi"]=WiFi.RSSI();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
-  d["powerSave"]=powerSave;d["powerAuto"]=powerAuto;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
+  d["powerSave"]=powerSave;d["powerAuto"]=powerAuto;d["trial"]=trial;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["raw"]=batteryRawMv;b["percent"]=percentNow();b["charge"]=chargeName(charge.state);b["scale"]=batteryScale;b["curve"]=batteryCurveSet;}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
+  d["localKey"]=token; // the local panel key, shown in the CRM to its owner and admins only
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
   auto a=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)a[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));
   auto ap=d["applied"].to<JsonObject>();for(int i=0;i<CRM_ITEM_COUNT;i++)ap[CRM_ITEMS[i]]=crmApplied[i];
@@ -482,6 +504,43 @@ bool setBatteryCalibration(int scale,const int16_t* curve,bool persist=true){
   Serial.printf("[battery] calibration scale=%d curve=%d\n",scale,batteryCurveSet);
   return true;
 }
+// Firmware uploaded in the CRM: streamed into the inactive OTA slot, checked against its
+// SHA-256 and by the image check of Update before it may boot.
+int crmFwFails=0;
+bool crmFirmware(uint32_t seq,JsonObjectConst f){
+  uint32_t size=f["size"]|0;String sha=f["sha256"]|"";
+  if(size<100000||size>0x140000||sha.length()!=64){crmError="Прошивка в CRM не прошла проверку";return false;}
+  Serial.printf("[ota] downloading %s from the CRM, %u bytes\n",(const char*)(f["version"]|"?"),(unsigned)size);
+  otaBusy=true;bool ok=false;
+  HTTPClient http;WiFiClientSecure tls;WiFiClient plain;
+  if(crmRequest(http,tls,plain,crmUrl+"/api/sign/firmware.php?seq="+String(seq))==0){
+    http.setTimeout(15000);int code=http.GET();
+    if(code!=200||http.getSize()!=(int)size)crmError="Прошивка из CRM: "+crmFail(http,code);
+    else if(!Update.begin(size,U_FLASH))crmError=String("Прошивка из CRM: ")+Update.errorString();
+    else{
+      WiFiClient* in=http.getStreamPtr();mbedtls_sha256_context c;mbedtls_sha256_init(&c);mbedtls_sha256_starts_ret(&c,0);
+      static uint8_t buf[2048];uint32_t got=0,last=millis();
+      while(got<size&&millis()-last<20000){
+        size_t n=in->available();
+        if(!n){if(!http.connected())break;delay(2);continue;}
+        n=in->readBytes(buf,std::min<size_t>(std::min<size_t>(n,sizeof buf),size-got));
+        if(!n)continue;
+        if(Update.write(buf,n)!=n)break;
+        mbedtls_sha256_update_ret(&c,buf,n);got+=n;last=millis();
+      }
+      uint8_t d[32];char hex[65];mbedtls_sha256_finish_ret(&c,d);mbedtls_sha256_free(&c);
+      for(int i=0;i<32;i++)snprintf(hex+2*i,3,"%02x",d[i]);
+      if(got!=size)crmError="Прошивка из CRM скачалась не полностью";
+      else if(!sha.equalsIgnoreCase(hex))crmError="Прошивка из CRM повреждена: контрольная сумма не совпала";
+      else if(!Update.end(true))crmError=String("Прошивка из CRM не прошла проверку: ")+Update.errorString();
+      else ok=true;
+      if(!ok&&Update.isRunning())Update.abort();
+    }
+  }else crmError="Неверный адрес CRM";
+  http.end();otaBusy=false;
+  Serial.printf("[ota] CRM download %s\n",ok?"verified":crmError.c_str());
+  return ok;
+}
 // Applies what the CRM changed since the last applied seq; returns true when something changed.
 bool crmApply(JsonDocument& r){
   bool changed=false;
@@ -526,6 +585,19 @@ bool crmApply(JsonDocument& r){
     for(int i=0;hasCurve&&i<CURVE_POINTS;i++)curve[i]=a[i]|0;
     if(!setBatteryCalibration(r["battery"]["scale"]|1000,hasCurve?curve:nullptr))crmError="Калибровка аккумулятора из CRM не прошла проверку";
     crmMarkApplied(9,seq);
+  }
+  // Firmware from the CRM, last: on success the sign restarts into it. A recovery build would
+  // cut the CRM link, so the CRM never offers one; the version check is a second guard.
+  seq=r["firmware"]["seq"]|0;
+  if(seq>crmApplied[10]){
+    const char* v=r["firmware"]["version"]|"";
+    if(!strcmp(v,FW_VERSION)||strstr(v,"recovery")||RECOVERY_MODE)crmMarkApplied(10,seq);
+    else if(!rendering&&!radioPaused&&!restartAt&&!otaBusy){
+      if(crmFirmware(seq,r["firmware"])){
+        crmMarkApplied(10,seq);crmFwFails=0;startTrial(true);
+        logEvent(EV_OTA,OTA_RECEIVED,r["firmware"]["size"]|0,1);restartAt=millis()+1500;
+      }else if(++crmFwFails>=3){crmMarkApplied(10,seq);crmFwFails=0;logEvent(EV_OTA,OTA_FAILED);}
+    }
   }
   // «Разбудить» from the CRM: stay reachable for 10 minutes from this check on.
   seq=r["wake"]["seq"]|0;
@@ -742,10 +814,7 @@ void routes(){
     if(!auth())return;
     if(!otaOK){error(400,otaError.length()?otaError.c_str():"Нужен файл firmware.bin");return;}
     Serial.printf("[ota] %u bytes written; restarting into the new image\n",(unsigned)otaBytes);
-    // Lets the next boot tell an installed image from a rollback to this one.
-    const esp_partition_t* next=esp_ota_get_boot_partition();
-    if(logReady&&next){logPrefs.putUInt("otaTo",next->address);logPrefs.putUInt("otaFrom",versionNumber(FW_VERSION));}
-    logEvent(EV_OTA,OTA_RECEIVED,otaBytes);
+    startTrial(false);logEvent(EV_OTA,OTA_RECEIVED,otaBytes);
     JsonDocument d;d["accepted"]=true;d["bytes"]=otaBytes;reply(200,d);restartAt=millis()+1500;
   },firmwareUpload);
   web.on("/api/v1/settings",HTTP_PUT,[]{
@@ -823,7 +892,7 @@ void routes(){
 }
 void setup(){
   Serial.begin(115200);bootReason=esp_reset_reason();
-  Serial.printf("\n[boot] AviorSign %s reset=%s(%d) heap=%u\n",FW_VERSION,resetName(bootReason),(int)bootReason,ESP.getFreeHeap());
+  Serial.printf("\n[boot] AviorSign %s reset=%s(%d) heap=%u %s\n",FW_VERSION,resetName(bootReason),(int)bootReason,ESP.getFreeHeap(),FW_MARKER);
   logBegin();
   // What the previous run was doing before an unexpected reset (not after a power loss,
   // which clears RTC memory, nor after the planned restart for a firmware update).
@@ -845,6 +914,14 @@ void setup(){
       bool installed=running&&running->address==logPrefs.getUInt("otaTo",0);
       logEvent(EV_OTA,installed?OTA_INSTALLED:OTA_ROLLED_BACK,versionNumber(FW_VERSION),logPrefs.getUInt("otaFrom",0));
       logPrefs.remove("otaTo");logPrefs.remove("otaFrom");
+    }
+    if(logReady&&logPrefs.isKey("trialPrev")){
+      if(!running||running->address==logPrefs.getUInt("trialPrev",0))endTrial(); // back on the previous image
+      else{
+        trial=true;trialCrm=logPrefs.getBool("trialCrm",false);uint8_t boots=logPrefs.getUChar("trialBoots",0)+1;logPrefs.putUChar("trialBoots",boots);
+        Serial.printf("[ota] trial boot %u of the new image, confirmed by %s\n",boots,trialCrm?"the CRM":"one minute of work");
+        if(boots>3)revertTrial(false);
+      }
     }
   }
   crmPrefs.begin("avior-crm",RECOVERY_MODE);
@@ -911,7 +988,11 @@ void setup(){
 }
 void loop(){
   web.handleClient();Result r;
-  if(otaPending&&millis()>=OTA_CONFIRM_MS){esp_ota_mark_app_valid_cancel_rollback();otaPending=false;logEvent(EV_OTA,OTA_CONFIRMED,versionNumber(FW_VERSION));}
+  if((otaPending||trial)&&(trialCrm?crmEverOk:millis()>=OTA_CONFIRM_MS)){
+    if(otaPending)esp_ota_mark_app_valid_cancel_rollback();
+    otaPending=false;endTrial();logEvent(EV_OTA,OTA_CONFIRMED,versionNumber(FW_VERSION));
+  }
+  if(trial&&trialCrm&&millis()>=TRIAL_CRM_MS)revertTrial(true);
   if(restartAt&&(int32_t)(millis()-restartAt)>=0){Serial.flush();ESP.restart();}
   if(sleepTestAt&&(int32_t)(millis()-sleepTestAt)>=0){
     sleepTestAt=0;sampleBattery();bool button=lightSleep(sleepTestSeconds);

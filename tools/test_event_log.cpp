@@ -40,6 +40,9 @@ int main(){
   expect(text(ev(EV_REFRESH_FAIL,2,40050)),"Экран не обновился: «Скоро буду», 40,0 с");
   expect(text(ev(EV_OTA,OTA_INSTALLED,400,302)),"Установлена прошивка 0.4.0 (была 0.3.2)");
   expect(text(ev(EV_OTA,OTA_RECEIVED,1195781)),"Получена прошивка, 1167 КБ — перезапуск");
+  expect(text(ev(EV_OTA,OTA_RECEIVED,1238448,1)),"Скачана прошивка из CRM, 1209 КБ — перезапуск");
+  expect(text(ev(EV_OTA,OTA_REVERTED,403,1)),"Прошивка 0.4.3 не вышла на связь с CRM за 10 минут — возврат к прежней");
+  expect(text(ev(EV_OTA,OTA_FAILED,0)),"Прошивка из CRM не скачалась после 3 попыток");
   expect(text(ev(EV_BATTERY,12,3480)),"Низкий заряд: 12 %, АКБ 3,48 В");
   expect(text(ev(EV_POWER,1,1)),"Экономия заряда включена (из CRM)");
   expect(text(ev(EV_POWER,0,2)),"Экономия заряда выключена (автоматически: питание от USB)");

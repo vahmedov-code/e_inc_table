@@ -12,4 +12,14 @@ constexpr bool RECOVERY_MODE = AVIOR_RECOVERY != 0;
 constexpr bool RECOVERY_WIFI = RECOVERY_MODE && AVIOR_RECOVERY_WIFI != 0;
 constexpr bool canMutate(bool wifi=false){return !RECOVERY_MODE || (RECOVERY_WIFI && wifi);}
 constexpr const char* MODE_NAME = RECOVERY_WIFI ? "recovery-wifi" : RECOVERY_MODE ? "recovery" : "normal";
-constexpr const char* FW_VERSION = RECOVERY_WIFI ? "0.4.2-recovery-wifi" : RECOVERY_MODE ? "0.4.2-recovery" : "0.4.2";
+#define AVIOR_VERSION "0.4.3"
+#if AVIOR_RECOVERY_WIFI
+#define AVIOR_VERSION_FULL AVIOR_VERSION "-recovery-wifi"
+#elif AVIOR_RECOVERY
+#define AVIOR_VERSION_FULL AVIOR_VERSION "-recovery"
+#else
+#define AVIOR_VERSION_FULL AVIOR_VERSION
+#endif
+constexpr const char* FW_VERSION = AVIOR_VERSION_FULL;
+// Found by the CRM in an uploaded firmware.bin: which version it is, and that it is AviorSign.
+#define AVIOR_FW_MARKER "AVIORSIGN_VERSION=" AVIOR_VERSION_FULL ";"
