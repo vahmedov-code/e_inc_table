@@ -19,3 +19,51 @@ constexpr int batteryPercent(int mv){
   for(int i=1;i<11;i++)if(mv<=v[i])return p[i-1]+(p[i]-p[i-1])*(mv-v[i-1])/(v[i]-v[i-1]);
   return 100;
 }
+
+// Charging, inferred from the battery voltage alone: the board has no charger status line
+// on an ESP32 input (owner check on 0.4.0: GPIO32/34 do not change with USB). With USB
+// the reading sits about 50 mV higher (owner: 4.25 V on USB, 4.20 V without, both full),
+// so plugging and unplugging show as steps; a rising trend also means charging, and a
+// plateau near 4.2 V while charging means the charger has finished.
+enum ChargeState : uint8_t {CHARGE_UNKNOWN=0,CHARGE_OFF,CHARGE_ON,CHARGE_FULL};
+constexpr const char* chargeName(uint8_t s){return s==CHARGE_OFF?"discharging":s==CHARGE_ON?"charging":s==CHARGE_FULL?"full":"unknown";}
+struct ChargeTracker {
+  static constexpr int STEP_MV=30;            // USB plugged or unplugged
+  static constexpr int ABOVE_BATTERY_MV=4230; // only external power reads this high
+  static constexpr int FULL_MV=4180;
+  static constexpr uint32_t TREND_MS=600000;  // rise over 10 minutes means charging
+  static constexpr int TREND_MV=15;
+  static constexpr uint32_t PLATEAU_MS=600000;// no rise for 10 minutes near 4.2 V: full
+  int recent[6]={0};int count=0;              // last trusted samples, oldest first
+  int trendMv=0;uint32_t trendAt=0;
+  int peakMv=0;uint32_t peakAt=0;
+  ChargeState state=CHARGE_UNKNOWN;
+  static int median3(const int* v){int a=v[0],b=v[1],c=v[2];return a>b?(b>c?b:(a>c?c:a)):(a>c?a:(b>c?c:b));}
+  void set(ChargeState s,uint32_t now,int mv){if(s==CHARGE_ON&&state!=CHARGE_ON){peakMv=mv;peakAt=now;}state=s;}
+  // A trusted sample: not during or right after a refresh, a wake or a radio change.
+  ChargeState update(uint32_t now,int mv){
+    if(count==6){for(int i=0;i<5;i++)recent[i]=recent[i+1];count=5;}
+    recent[count++]=mv;
+    if(count<3)return state;
+    int m=median3(&recent[count-3]);
+    if(!trendAt){trendMv=m;trendAt=now;}
+    if(count==6){
+      int d=m-median3(recent);
+      if(d>=STEP_MV){set(CHARGE_ON,now,m);for(int i=0;i<3;i++)recent[i]=recent[i+3];count=3;trendMv=m;trendAt=now;}
+      else if(d<=-STEP_MV){set(CHARGE_OFF,now,m);for(int i=0;i<3;i++)recent[i]=recent[i+3];count=3;trendMv=m;trendAt=now;}
+    }
+    if(m>=ABOVE_BATTERY_MV&&state!=CHARGE_ON&&state!=CHARGE_FULL)set(CHARGE_ON,now,m);
+    if(now-trendAt>=TREND_MS){
+      int d=m-trendMv;
+      if(d>=TREND_MV&&state!=CHARGE_ON&&state!=CHARGE_FULL)set(CHARGE_ON,now,m);
+      else if(d<=-TREND_MV&&(state==CHARGE_ON||state==CHARGE_FULL))set(CHARGE_OFF,now,m);
+      else if(state==CHARGE_UNKNOWN&&d<TREND_MV)set(CHARGE_OFF,now,m);
+      trendMv=m;trendAt=now;
+    }
+    if(state==CHARGE_ON){
+      if(m>peakMv+5){peakMv=m;peakAt=now;}
+      else if(m>=FULL_MV&&now-peakAt>=PLATEAU_MS)set(CHARGE_FULL,now,m);
+    }
+    return state;
+  }
+};

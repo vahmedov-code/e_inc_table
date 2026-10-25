@@ -118,6 +118,9 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  device.battery={pin:35,mv:3950,percent:71,divider:2};device.adcProbe={'32':0,'35':1975};await w.refresh();
  assert.equal(d.getElementById('battery').textContent,'АКБ ≈71 % · 3,95 В');assert.match(d.getElementById('adcProbe').textContent,/GPIO35 1975/);
  device.battery.percent=10;await w.refresh();assert.match(d.getElementById('battery').className,/bad/,'low battery highlighted');
+ device.battery.charge='charging';await w.refresh();assert.equal(d.getElementById('battery').textContent,'⚡ АКБ заряжается · ≈10 % · 3,95 В');assert.match(d.getElementById('batteryInfo').textContent,/Идёт зарядка/);
+ device.battery.charge='full';await w.refresh();assert.equal(d.getElementById('battery').textContent,'АКБ заряжен · 3,95 В');assert.match(d.getElementById('battery').className,/ok/);
+ device.battery.charge='discharging';device.battery.percent=71;await w.refresh();assert.equal(d.getElementById('battery').textContent,'АКБ ≈71 % · 3,95 В');
  device.busy=true;device.hardwareConfirmed=true;await w.refresh();
  assert.match(d.getElementById('deviceState').textContent,/Wi‑Fi временно выключен/);assert.equal(d.getElementById('publish').disabled,true);
  device.busy=false;await w.refresh();

@@ -42,6 +42,9 @@ int main(){
   expect(text(ev(EV_OTA,OTA_RECEIVED,1195781)),"Получена прошивка, 1167 КБ — перезапуск");
   expect(text(ev(EV_BATTERY,12,3480)),"Низкий заряд: 12 %, АКБ 3,48 В");
   expect(text(ev(EV_POWER,1,1)),"Экономия заряда включена (из CRM)");
+  expect(text(ev(EV_CHARGE,2,3970)),"Идёт зарядка от USB, АКБ 3,97 В");
+  expect(text(ev(EV_CHARGE,3,4250,7860)),"Аккумулятор заряжен за 2 ч 11 мин, АКБ 4,25 В");
+  expect(text(ev(EV_CHARGE,1,4180)),"USB отключён, работа от аккумулятора, АКБ 4,18 В");
   expect(text(ev(EV_DROPPED,0,17)),"Пропущено событий: 17 — их было слишком много подряд");
   // A short buffer still ends on a whole letter.
   char small[40];eventText(ev(EV_RENDER_ABORT,4,9),small,sizeof small);

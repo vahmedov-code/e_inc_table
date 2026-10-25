@@ -10,13 +10,13 @@
 // 16-byte record of numbers; the Russian text is made only when someone reads it.
 enum EventKind : uint8_t {
   EV_BOOT=1,EV_BEFORE_RESET,EV_RENDER_ABORT,EV_WIFI_DOWN,EV_WIFI_UP,EV_ACCESS_POINT,EV_CRM_ERROR,EV_CRM_OK,
-  EV_REFRESH,EV_REFRESH_FAIL,EV_OTA,EV_BATTERY,EV_POWER,EV_DROPPED,EV_KIND_END
+  EV_REFRESH,EV_REFRESH_FAIL,EV_OTA,EV_BATTERY,EV_POWER,EV_DROPPED,EV_CHARGE,EV_KIND_END
 };
 constexpr const char* eventKindName(uint8_t k){
   return k==EV_BOOT?"boot":k==EV_BEFORE_RESET?"before_reset":k==EV_RENDER_ABORT?"render_abort":k==EV_WIFI_DOWN?"wifi_down":
     k==EV_WIFI_UP?"wifi_up":k==EV_ACCESS_POINT?"access_point":k==EV_CRM_ERROR?"crm_error":k==EV_CRM_OK?"crm_ok":
     k==EV_REFRESH?"refresh":k==EV_REFRESH_FAIL?"refresh_fail":k==EV_OTA?"ota":k==EV_BATTERY?"battery":
-    k==EV_POWER?"power":k==EV_DROPPED?"dropped":"other";
+    k==EV_POWER?"power":k==EV_DROPPED?"dropped":k==EV_CHARGE?"charge":"other";
 }
 // Stored in NVS as LOG_CHUNKS blobs of LOG_CHUNK records: one event rewrites 128 bytes.
 constexpr int LOG_CAPACITY=64,LOG_CHUNK=8,LOG_CHUNKS=LOG_CAPACITY/LOG_CHUNK;
@@ -193,6 +193,12 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
       appendf(out,size,e.code<=15?"Низкий заряд: %d %%":"Заряд восстановился: %d %%",e.code);volts(e.value);break;
     case EV_POWER:
       appendf(out,size,"Экономия заряда %s (%s)",e.code?"включена":"выключена",e.value?"из CRM":"из панели");break;
+    case EV_CHARGE: // code: ChargeState (battery.h), value: mV, extra: seconds of charging
+      if(e.code==2)appendf(out,size,"Идёт зарядка от USB");
+      else if(e.code==3){appendf(out,size,"Аккумулятор заряжен");if(e.extra>0){durationText(e.extra,a,sizeof a);appendf(out,size," за %s",a);}}
+      else appendf(out,size,"USB отключён, работа от аккумулятора");
+      volts(e.value);
+      break;
     case EV_DROPPED:
       appendf(out,size,"Пропущено событий: %d — их было слишком много подряд",(int)e.value);break;
     default:

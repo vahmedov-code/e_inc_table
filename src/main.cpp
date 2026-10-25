@@ -220,6 +220,19 @@ void trackWifi(){
   if(netUp){netUp=false;netLostAt=netDownSince;logEvent(EV_WIFI_DOWN,wifiFirstReason,netRssi,wifiLastReason);}
   else if(!netEverUp&&!netBootMissed&&millis()>=60000){netBootMissed=true;logEvent(EV_WIFI_DOWN,wifiFirstReason,1,wifiLastReason);}
 }
+// Charging for the panel, the CRM and the log (inferred from the voltage, battery.h). Samples
+// near a refresh, a wake or a radio start are skipped: the load change would look like USB.
+ChargeTracker charge;uint32_t chargeSince=0;
+void trackCharge(){
+  if(batteryPin<0||rendering||radioPaused)return;
+  if((lastRefresh&&millis()-lastRefresh<30000)||millis()-wokeAt<20000||millis()-radioOnAt<20000)return;
+  ChargeState before=charge.state,now=charge.update(millis(),batteryMv);
+  if(now==before)return;
+  if(now==CHARGE_ON)chargeSince=millis();
+  if(before!=CHARGE_UNKNOWN||now!=CHARGE_OFF) // the first estimate after boot is no event
+    logEvent(EV_CHARGE,now,batteryMv,now==CHARGE_FULL&&chargeSince?(millis()-chargeSince)/1000:0);
+  if(now==CHARGE_OFF)chargeSince=0;
+}
 uint32_t scanStarted=0;
 struct WifiSnapshot {
   WifiEvidence evidence{};
@@ -379,7 +392,7 @@ void state(){
   {auto l=d["log"].to<JsonObject>();l["next"]=logNext;l["boot"]=bootCount;nvs_stats_t st;
    if(nvs_get_stats(nullptr,&st)==ESP_OK){l["nvsUsed"]=st.used_entries;l["nvsFree"]=st.free_entries;}}
   d["interruptedPhase"]=phaseName(interruptedPhase);d["renderAborts"]=renderAborts;
-  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;}
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["divider"]=BATTERY_DIVIDER;b["charge"]=chargeName(charge.state);}
   auto probe=d["adcProbe"].to<JsonObject>();for(int i=0;i<ADC_PROBE_COUNT;i++)probe[String(ADC_PROBE_PINS[i])]=adcMv[i];
   d["cooldownSeconds"]=lastRefresh&&millis()-lastRefresh<60000?(60000-(millis()-lastRefresh))/1000:0;
   auto assets=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)assets[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));reply(200,d);
@@ -409,7 +422,7 @@ String crmReport(){
   d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
   d["powerSave"]=powerSave;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
-  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);}
+  if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["percent"]=batteryPercent(batteryMv);b["charge"]=chargeName(charge.state);}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
   auto a=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)a[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));
@@ -890,7 +903,7 @@ void loop(){
   }
   if(!crmWaitReason()&&millis()-crmLastTry>=crmIntervalMs)crmSync();
   if(millis()-lastHealth>=5000){
-    lastHealth=millis();sampleBattery();trackBattery();takeSnapshot();
+    lastHealth=millis();sampleBattery();trackBattery();trackCharge();takeSnapshot();
     Serial.printf("[battery] pin=%d mv=%d percent=%d adc_mv",batteryPin,batteryMv,batteryPin>=0?batteryPercent(batteryMv):-1);
     for(int i=0;i<ADC_PROBE_COUNT;i++)Serial.printf(" %d:%d",ADC_PROBE_PINS[i],adcMv[i]);Serial.println();
     WifiSnapshot wifi=wifiSnapshot();

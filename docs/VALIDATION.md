@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.1: charging indication
+
+Owner readings on 0.4.0 with a full battery: on USB GPIO33 2125 mV (4.25 V), without USB 2101 mV (4.20 V); GPIO32 631/635 and GPIO34 322/301 mV, i.e. no charger status reaches an ADC input. Charging is therefore inferred from the battery voltage (`ChargeTracker`). `tools/test_charge.cpp` simulates plugging, charging with Wi-Fi dips, the full plateau, unplugging, a boot on USB, plugging during sleep and discharging with dips. Not yet seen on the board: the size of the step while charging a part-empty battery, false steps from load changes. A charger status wire (CHRG/STDBY) to a free input would make it exact.
+
 ## Update 0.4.0: owner's templates and the event log
 
 Built-in pictures are the owner's three designs. `tools/prepare_templates.py` quantises them to the panel's four colours, removes speckles, takes the shared bottom strip from «Скоро буду» and clears the QR square; `tools/make_templates.py` packs and run-length encodes them (round-trip asserted) into `include/templates.h`, about 78 KB of flash for all three. `tools/test_compose.cpp` checks every banded frame against a checksum of the template and the QR modules at the new square.
