@@ -10,13 +10,13 @@
 // 16-byte record of numbers; the Russian text is made only when someone reads it.
 enum EventKind : uint8_t {
   EV_BOOT=1,EV_BEFORE_RESET,EV_RENDER_ABORT,EV_WIFI_DOWN,EV_WIFI_UP,EV_ACCESS_POINT,EV_CRM_ERROR,EV_CRM_OK,
-  EV_REFRESH,EV_REFRESH_FAIL,EV_OTA,EV_BATTERY,EV_POWER,EV_DROPPED,EV_CHARGE,EV_KIND_END
+  EV_REFRESH,EV_REFRESH_FAIL,EV_OTA,EV_BATTERY,EV_POWER,EV_DROPPED,EV_CHARGE,EV_ACCESS,EV_KIND_END
 };
 constexpr const char* eventKindName(uint8_t k){
   return k==EV_BOOT?"boot":k==EV_BEFORE_RESET?"before_reset":k==EV_RENDER_ABORT?"render_abort":k==EV_WIFI_DOWN?"wifi_down":
     k==EV_WIFI_UP?"wifi_up":k==EV_ACCESS_POINT?"access_point":k==EV_CRM_ERROR?"crm_error":k==EV_CRM_OK?"crm_ok":
     k==EV_REFRESH?"refresh":k==EV_REFRESH_FAIL?"refresh_fail":k==EV_OTA?"ota":k==EV_BATTERY?"battery":
-    k==EV_POWER?"power":k==EV_DROPPED?"dropped":k==EV_CHARGE?"charge":"other";
+    k==EV_POWER?"power":k==EV_DROPPED?"dropped":k==EV_CHARGE?"charge":k==EV_ACCESS?"access":"other";
 }
 // Stored in NVS as LOG_CHUNKS blobs of LOG_CHUNK records: one event rewrites 128 bytes.
 constexpr int LOG_CAPACITY=64,LOG_CHUNK=8,LOG_CHUNKS=LOG_CAPACITY/LOG_CHUNK;
@@ -38,6 +38,8 @@ enum : uint8_t {AP_NO_NETWORK=0,AP_NETWORK_LOST,AP_BUTTON,AP_NETWORK_BACK};
 // EV_CRM_ERROR kinds (extra): a failed HTTP exchange, an unreadable answer, a bad address.
 enum : uint8_t {CRM_FAIL_HTTP=0,CRM_FAIL_ANSWER,CRM_FAIL_ADDRESS};
 // EV_OTA steps (code).
+// EV_ACCESS steps (code); for ACCESS_SET value is the source: 0 panel, 1 CRM, 2 first setup.
+enum : uint8_t {ACCESS_SET=1,ACCESS_RESET,ACCESS_LOCKED};
 enum : uint8_t {OTA_RECEIVED=0,OTA_INSTALLED,OTA_ROLLED_BACK,OTA_CONFIRMED,OTA_FAILED,OTA_REVERTED};
 
 // "0.4.0" -> 400, so a version fits a record field.
@@ -200,6 +202,11 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
       else if(e.code==3){appendf(out,size,"Аккумулятор заряжен");if(e.extra>0){durationText(e.extra,a,sizeof a);appendf(out,size," за %s",a);}}
       else appendf(out,size,"USB отключён, работа от аккумулятора");
       volts(e.value);
+      break;
+    case EV_ACCESS:
+      if(e.code==ACCESS_SET)appendf(out,size,"Логин и пароль панели заданы (%s)",e.value==1?"из CRM":e.value==2?"первая настройка":"в панели");
+      else if(e.code==ACCESS_RESET)appendf(out,size,"Пароль панели сброшен кнопкой на плате");
+      else appendf(out,size,"5 неверных паролей подряд — вход в панель закрыт на минуту");
       break;
     case EV_DROPPED:
       appendf(out,size,"Пропущено событий: %d — их было слишком много подряд",(int)e.value);break;

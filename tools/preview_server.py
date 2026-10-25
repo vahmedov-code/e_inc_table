@@ -1,4 +1,4 @@
-"""UI-only simulator. Does not connect to hardware. Key: preview. Binds loopback."""
+"""UI-only simulator. Does not connect to hardware. Log in with «Войти по ключу API», key: preview. Binds loopback."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
@@ -37,6 +37,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/':
             b=(root/'web/index.html').read_bytes();self.send_response(200)
             self.send_header('Content-Type','text/html; charset=utf-8');self.end_headers();self.wfile.write(b);return
+        if self.path=='/api/v1/auth':self.send(200,{'setup':False,'setupAllowed':False,'loggedIn':self.headers.get('Authorization')=='Bearer preview','user':'admin'});return
         if self.headers.get('Authorization')!='Bearer preview':self.send(401,{'error':'Введите тестовый ключ preview'});return
         if self.path=='/api/v1/state':self.send(200,{**state,'unixTime':int(time.time())})
         elif self.path=='/api/v1/schedule':self.send(200,schedule)

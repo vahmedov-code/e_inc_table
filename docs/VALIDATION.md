@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.4: login and password instead of the key
+
+`tools/test_ui.cjs` covers the login screen, a wrong password, the session without a key, the first setup with a password mismatch, and logout; the key login stays. The CRM computes PBKDF2 with PHP `hash_pbkdf2`, checked against Python `hashlib.pbkdf2_hmac`; the firmware uses mbedTLS `mbedtls_pkcs5_pbkdf2_hmac` with the same parameters, not yet run on the board. Firmware 1,247,377 bytes, 95 % of the OTA slot.
+
 ## Update 0.4.3: firmware from the CRM
 
 The CRM side was run against a local MariaDB and PHP in a real browser: a 0.4.2 file without the version marker is refused, the 0.4.3 file is uploaded in three 512 KB parts, stored with its SHA-256, offered in the sync answer and served by `api/sign/firmware.php` byte for byte with Content-Length; a stale seq gets 404. The firmware side (download, SHA-256, trial and return to the previous image) compiles but has not run on the board: the first CRM update should be watched in the journal.

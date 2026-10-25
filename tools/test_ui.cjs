@@ -10,7 +10,7 @@ const {createCanvas}=deps('@napi-rs/canvas');
 const requests=[];const errors=[];
 const device={batterySave:false,wakeMinutes:15,wakeReason:'boot',accessPoint:false,apName:'AviorSign-1a2b',crm:{enabled:false,url:'https://cms.avior.moscow',configured:false,error:''},version:'0.3.0',qrEnabled:true,qrUrl:'https://avior.moscow/na-svyazi/',desired:'closed',displayed:'closed',busy:false,displayError:'',hardwareConfirmed:false,storageReady:true,automatic:false,source:'manual',ip:'192.168.1.42',apIP:'192.168.4.1',wifiConnected:true,timeValid:true,unixTime:1792587600,cooldownSeconds:0};
 let schedule={enabled:false,utcOffsetMinutes:180,events:[]};
-let scanMode='ok',scanPolls=0;
+let scanMode='ok',scanPolls=0,session=false,authInfo={setup:false,setupAllowed:false,loggedIn:false,user:'admin'};
 const vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e));
 const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),{
  url:'http://avior.test/',runScripts:'dangerously',virtualConsole:vc,
@@ -20,8 +20,13 @@ const dom=new JSDOM(readFileSync(resolve(__dirname,'../web/index.html'),'utf8'),
    w.createImageBitmap=async()=>{const c=createCanvas(16,16);const x=c.getContext('2d');x.fillStyle='#c41e23';x.fillRect(0,0,16,16);c.close=()=>{};return c;};
    w.fetch=async(url,opts)=>{
      requests.push({url,opts});
-     if(opts.headers.Authorization!=='Bearer preview')return {ok:false,status:401,json:async()=>({error:'Неверный ключ'})};
      let data=opts.body&&typeof opts.body==='string'?JSON.parse(opts.body):null;
+     const keyOk=(opts.headers||{}).Authorization==='Bearer preview';
+     if(url.endsWith('/auth'))return {ok:true,status:200,json:async()=>({...authInfo,loggedIn:keyOk||session})};
+     if(url.endsWith('/auth/login')){if(data.user==='admin'&&data.password==='secret-pass'){session=true;return {ok:true,status:200,json:async()=>({ok:true})};}return {ok:false,status:401,json:async()=>({error:'Неверный логин или пароль'})};}
+     if(url.endsWith('/auth/setup')){session=true;authInfo={setup:false,setupAllowed:false,loggedIn:true,user:data.user};return {ok:true,status:200,json:async()=>({ok:true})};}
+     if(url.endsWith('/auth/logout')){session=false;return {ok:true,status:200,json:async()=>({ok:true})};}
+     if(!keyOk&&!session)return {ok:false,status:401,json:async()=>({error:'Неверный ключ'})};
      if(url.endsWith('/wifi/scan')){
        if(opts.method==='POST'){scanPolls=0;return {ok:true,status:202,json:async()=>({scanning:true})};}
        if(scanMode==='error')return {ok:false,status:503,json:async()=>({error:'Поиск временно недоступен'})};
@@ -50,10 +55,11 @@ const tick=()=>new Promise(r=>setTimeout(r,20));
 const click=async(id)=>{d.getElementById(id).click();await tick();};
 const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now()-start>3500)throw Error('Timed out waiting for UI action');await tick();}};
 (async()=>{
- assert.equal(requests.length,0,'no unauthenticated polling');
- d.getElementById('token').value='wrong';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+ await tick();assert(requests.every(r=>r.url.endsWith('/auth')),'only the login check before logging in');
+ assert.equal(d.getElementById('login').hidden,false);assert.equal(d.getElementById('loginTitle').textContent,'Вход в панель вывески');
+ d.getElementById('token').value='wrong';d.getElementById('keyForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
  assert.match(d.getElementById('feedback').textContent,/Неверный ключ/);
- d.getElementById('token').value='preview';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+ d.getElementById('token').value='preview';d.getElementById('keyForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
  assert.equal(d.getElementById('login').hidden,true);
  assert.equal(w.sessionStorage.getItem('aviorKey'),'preview');
  d.querySelector('[data-status="open"]').click();await click('publish');
@@ -171,6 +177,19 @@ const waitFor=async(check)=>{const start=Date.now();while(!check()){if(Date.now(
  await click('downloadLog');await waitFor(()=>saved);
  const file=await saved.text();assert.match(fileName,/^aviorsign-log-\d{4}-\d\d-\d\d\.txt$/);assert.match(file,/^AviorSign /);const body=file.trim().split('\r\n').slice(2);
  assert.equal(body.length,3);assert.match(body[0],/\trefresh\t/,'oldest first in the file');assert.match(body[2],/\twifi_down\t/);
- await click('disconnect');assert.equal(w.sessionStorage.getItem('aviorKey'),null);
- assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload, stale-image guard and event log: PASS');dom.window.close();
+ await click('disconnect');await tick();assert.equal(w.sessionStorage.getItem('aviorKey'),null);assert.equal(d.getElementById('login').hidden,false);
+ // Login and password instead of the key.
+ d.getElementById('loginUser').value='admin';d.getElementById('loginPass').value='wrong-pass';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+ assert.match(d.getElementById('feedback').textContent,/Неверный логин или пароль/);
+ d.getElementById('loginPass').value='secret-pass';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();await tick();
+ assert.equal(d.getElementById('login').hidden,true,'password login opens the panel');assert.equal(requests.findLast(r=>r.url.endsWith('/state')).opts.headers.Authorization,undefined,'session, no key');
+ await click('disconnect');await tick();
+ // First setup: the sign has no password yet.
+ authInfo={setup:true,setupAllowed:true,loggedIn:false,user:''};await w.showLogin();
+ assert.equal(d.getElementById('loginTitle').textContent,'Задайте логин и пароль панели');assert.equal(d.getElementById('loginPass2Box').hidden,false);
+ d.getElementById('loginUser').value='weiss';d.getElementById('loginPass').value='new-pass-1';d.getElementById('loginPass2').value='other';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();
+ assert.match(d.getElementById('feedback').textContent,/не совпадают/);assert(!requests.some(r=>r.url.endsWith('/auth/setup')));
+ d.getElementById('loginPass2').value='new-pass-1';d.getElementById('loginForm').dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();await tick();
+ assert.equal(JSON.parse(requests.findLast(r=>r.url.endsWith('/auth/setup')).opts.body).user,'weiss');assert.equal(d.getElementById('login').hidden,true);
+ assert.equal(errors.length,0,String(errors));console.log('UI authentication, status, schedule validation, palette, 96000-byte upload, stale-image guard, event log and login: PASS');dom.window.close();
 })().catch(e=>{console.error(e);dom.window.close();process.exitCode=1;});

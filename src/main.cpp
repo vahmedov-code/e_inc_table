@@ -19,6 +19,8 @@
 #include <nvs.h>
 #include <algorithm>
 #include <mbedtls/sha256.h>
+#include <mbedtls/md.h>
+#include <mbedtls/pkcs5.h>
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -181,8 +183,8 @@ bool makeQr(const String& text){
 const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
 bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
 uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
-const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery","firmware"};
-constexpr int CRM_ITEM_COUNT=11;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery","firmware","panel"};
+constexpr int CRM_ITEM_COUNT=12;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 uint32_t crmEventsAck=0; // last event-log seq the CRM confirmed it stored
 Preferences crmPrefs;
@@ -309,9 +311,58 @@ String assetPath(int s){return String("/")+keys[s]+".frame";}
 void reply(int code,const JsonDocument& d){String s;serializeJson(d,s);web.sendHeader("Cache-Control","no-store");web.send(code,"application/json",s);}
 void error(int code,const char* msg){JsonDocument d;d["error"]=msg;reply(code,d);}
 bool writable(bool wifi=false){if(canMutate(wifi))return true;error(423,"Диагностический режим: это действие отключено");return false;}
-bool authorized(){return web.header("Authorization")=="Bearer "+token;}
+// Panel login (0.4.4): a login and password set at first setup or from the CRM. Only the
+// PBKDF2-SHA256 of the password is stored (the CRM computes the same). A session is a cookie
+// signed with sessionKey: no session storage, survives reboots, ends on a password change.
+// The API key (token) still works as a Bearer header for scripts.
+String panelUser,panelSalt,panelHash;uint8_t sessionKey[32];
+constexpr int PBKDF2_ROUNDS=2000;constexpr uint32_t SESSION_SECONDS=30UL*86400;
+int loginFails=0;uint32_t loginLockUntil=0;bool buttonResetDone=false;
+String hexOf(const uint8_t* b,size_t n){String s;char h[3];for(size_t i=0;i<n;i++){snprintf(h,3,"%02x",b[i]);s+=h;}return s;}
+bool isHex(const String& s,size_t n){if(s.length()!=n)return false;for(char c:s)if(!isxdigit((unsigned char)c))return false;return true;}
+String passwordHash(const String& password,const String& saltHex){
+  uint8_t salt[16],out[32];for(int i=0;i<16;i++)salt[i]=strtoul(saltHex.substring(2*i,2*i+2).c_str(),nullptr,16);
+  mbedtls_md_context_t c;mbedtls_md_init(&c);mbedtls_md_setup(&c,mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),1);
+  mbedtls_pkcs5_pbkdf2_hmac(&c,(const uint8_t*)password.c_str(),password.length(),salt,16,PBKDF2_ROUNDS,32,out);mbedtls_md_free(&c);
+  return hexOf(out,32);
+}
+bool passwordSet(){return isHex(panelHash,64)&&isHex(panelSalt,32)&&panelUser.length();}
+bool validLogin(const String& user,const String& password){return user.length()>=1&&user.length()<=32&&password.length()>=8&&password.length()<=64;}
+void newSessionKey(){esp_fill_random(sessionKey,sizeof sessionKey);prefs.putBytes("sessKey",sessionKey,sizeof sessionKey);}
+void savePanelLogin(const String& user,const String& salt,const String& hash,int source){
+  panelUser=user;panelSalt=salt;panelHash=hash;prefs.putString("pUser",user);prefs.putString("pSalt",salt);prefs.putString("pHash",hash);
+  newSessionKey();logEvent(EV_ACCESS,ACCESS_SET,source);
+}
+void setPanelPassword(const String& user,const String& password,int source){
+  uint8_t salt[16];esp_fill_random(salt,16);String s=hexOf(salt,16);savePanelLogin(user,s,passwordHash(password,s),source);
+}
+// expiry 0: the clock was not set at login, so the session lasts until the next reboot.
+String sessionValue(uint32_t expiry){
+  String msg=String(expiry)+"|"+panelUser+(expiry?"":"|"+String(bootCount));uint8_t mac[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256),sessionKey,sizeof sessionKey,(const uint8_t*)msg.c_str(),msg.length(),mac);
+  return String(expiry)+"."+hexOf(mac,16);
+}
+bool sessionValid(){
+  if(!passwordSet())return false;
+  String c=web.header("Cookie");int at=c.indexOf("avior_session=");if(at<0)return false;
+  int end=c.indexOf(';',at);String v=c.substring(at+14,end<0?c.length():end);v.trim();
+  int dot=v.indexOf('.');if(dot<1)return false;
+  uint32_t expiry=strtoul(v.substring(0,dot).c_str(),nullptr,10);time_t now=time(nullptr);
+  if(expiry&&now>1700000000&&now>(time_t)expiry)return false;
+  return sessionValue(expiry)==v;
+}
+void sendSession(bool on){
+  time_t now=time(nullptr);uint32_t expiry=now>1700000000?(uint32_t)now+SESSION_SECONDS:0;
+  web.sendHeader("Set-Cookie",on?"avior_session="+sessionValue(expiry)+"; Path=/; HttpOnly; SameSite=Strict"+(expiry?"; Max-Age="+String(SESSION_SECONDS):""):
+    String("avior_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"));
+}
+bool keyAuthorized(){return web.header("Authorization")=="Bearer "+token;}
+bool authorized(){return keyAuthorized()||sessionValid();}
+// The first password needs proof of presence: a phone on the sign's own access point (which
+// the board button turns on), the API key, or the CRM.
+bool onAccessPoint(){return web.client().localIP()==WiFi.softAPIP();}
 // Only changes keep a battery-mode sign awake: an open panel polls state every 5 s.
-bool auth(){if(authorized()){if(powerSave&&web.method()!=HTTP_GET)stayAwake(60000);return true;}error(401,"Требуется ключ доступа из Serial Monitor");return false;}
+bool auth(){if(authorized()){if(powerSave&&web.method()!=HTTP_GET)stayAwake(60000);return true;}error(401,"Войдите в панель: логин и пароль");return false;}
 bool body(JsonDocument& d){
   if(web.arg("plain").length()>8192 || deserializeJson(d,web.arg("plain"))){error(400,"Некорректный JSON или превышен лимит 8192 байта");return false;}
   if(!d.is<JsonObject>()){error(400,"Ожидается JSON-объект");return false;}return true;
@@ -387,8 +438,12 @@ void manageAccessPoint(){
   else if(!want&&on&&WiFi.softAPgetStationNum()==0){WiFi.enableAP(false);Serial.println("[radio] access point off: office network is up");logEvent(EV_ACCESS_POINT,0,AP_NETWORK_BACK);}
 }
 void pollButton(){
-  if(digitalRead(0)!=LOW){buttonDownAt=0;return;}
+  if(digitalRead(0)!=LOW){buttonDownAt=0;buttonResetDone=false;return;}
   if(!buttonDownAt){buttonDownAt=millis()|1;return;}
+  // Held 10 s: forget the panel password; the access point (on after 1 s) lets you set a new one.
+  if(millis()-buttonDownAt>=10000&&!buttonResetDone&&passwordSet()){
+    buttonResetDone=true;panelHash="";prefs.remove("pHash");newSessionKey();logEvent(EV_ACCESS,ACCESS_RESET);
+  }
   if(millis()-buttonDownAt<1000||(int32_t)(apUntil-millis())>0)return;
   apUntil=millis()+AP_BUTTON_MS;if(powerSave){sessionWake=true;stayAwake(AP_BUTTON_MS);}
   Serial.println("[radio] button held: access point for 10 minutes");
@@ -411,6 +466,7 @@ void state(){
   d["unixTime"]=(int64_t)time(nullptr);d["heap"]=ESP.getFreeHeap();d["uptimeSeconds"]=millis()/1000;
   d["otaPending"]=otaPending;d["qrEnabled"]=qrEnabled;d["qrUrl"]=qrUrl;
   d["accessPoint"]=WiFi.getMode()==WIFI_AP_STA||WiFi.getMode()==WIFI_AP;d["apName"]=apName();
+  d["panelUser"]=passwordSet()?panelUser:"";
   d["batterySave"]=powerSave;d["powerAuto"]=powerAuto;d["powerManual"]=powerManual;d["wakeMinutes"]=POWER_WAKE_MINUTES;d["wakeReason"]=wakeReason;
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
@@ -453,7 +509,8 @@ String crmReport(){
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["raw"]=batteryRawMv;b["percent"]=percentNow();b["charge"]=chargeName(charge.state);b["scale"]=batteryScale;b["curve"]=batteryCurveSet;}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
-  d["localKey"]=token; // the local panel key, shown in the CRM to its owner and admins only
+  d["localKey"]=token; // the API key and the access point password, shown in the CRM to owner and admins only
+  d["apKey"]=apPassword;d["panelUser"]=passwordSet()?panelUser:"";
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
   auto a=d["assets"].to<JsonObject>();for(int i=0;i<4;i++)a[keys[i]]=fsReady&&LittleFS.exists(assetPath(i));
   auto ap=d["applied"].to<JsonObject>();for(int i=0;i<CRM_ITEM_COUNT;i++)ap[CRM_ITEMS[i]]=crmApplied[i];
@@ -585,6 +642,14 @@ bool crmApply(JsonDocument& r){
     for(int i=0;hasCurve&&i<CURVE_POINTS;i++)curve[i]=a[i]|0;
     if(!setBatteryCalibration(r["battery"]["scale"]|1000,hasCurve?curve:nullptr))crmError="Калибровка аккумулятора из CRM не прошла проверку";
     crmMarkApplied(9,seq);
+  }
+  // Panel login set in the CRM: the CRM sends the salt and PBKDF2 hash, never the password.
+  seq=r["panel"]["seq"]|0;
+  if(seq>crmApplied[11]){
+    String user=r["panel"]["user"]|"",salt=r["panel"]["salt"]|"",hash=r["panel"]["hash"]|"";
+    if(user.length()&&user.length()<=32&&isHex(salt,32)&&isHex(hash,64))savePanelLogin(user,salt,hash,1);
+    else crmError="Логин панели из CRM не прошёл проверку";
+    crmMarkApplied(11,seq);
   }
   // Firmware from the CRM, last: on success the sign restarts into it. A recovery build would
   // cut the CRM link, so the CRM never offers one; the version check is a second guard.
@@ -723,7 +788,37 @@ void firmwareUpload(){
   }
 }
 void routes(){
-  const char* headers[]={"Authorization"};web.collectHeaders(headers,1);
+  const char* headers[]={"Authorization","Cookie"};web.collectHeaders(headers,2);
+  web.on("/api/v1/auth",HTTP_GET,[]{
+    JsonDocument d;d["setup"]=!passwordSet();d["loggedIn"]=authorized();d["user"]=passwordSet()?panelUser:"";
+    d["setupAllowed"]=!passwordSet()&&(onAccessPoint()||keyAuthorized());reply(200,d);
+  });
+  web.on("/api/v1/auth/setup",HTTP_POST,[]{
+    JsonDocument d;if(!body(d))return;
+    if(passwordSet()){error(409,"Пароль уже задан — войдите или сбросьте его кнопкой на плате (держать 10 секунд)");return;}
+    if(!onAccessPoint()&&!keyAuthorized()){error(403,"Первый пароль задаётся из CRM или с телефона, подключённого к точке доступа вывески");return;}
+    String user=d["user"]|"",password=d["password"]|"";user.trim();
+    if(!validLogin(user,password)){error(400,"Логин до 32 символов, пароль от 8 до 64");return;}
+    setPanelPassword(user,password,2);sendSession(true);JsonDocument r;r["ok"]=true;reply(200,r);
+  });
+  web.on("/api/v1/auth/login",HTTP_POST,[]{
+    JsonDocument d;if(!body(d))return;
+    if((int32_t)(loginLockUntil-millis())>0){error(429,"Слишком много неверных попыток — подождите минуту");return;}
+    String user=d["user"]|"",password=d["password"]|"";user.trim();
+    if(!passwordSet()||user!=panelUser||passwordHash(password,panelSalt)!=panelHash){
+      if(++loginFails>=5){loginFails=0;loginLockUntil=millis()+60000;logEvent(EV_ACCESS,ACCESS_LOCKED);}
+      error(401,"Неверный логин или пароль");return;
+    }
+    loginFails=0;sendSession(true);JsonDocument r;r["ok"]=true;reply(200,r);
+  });
+  web.on("/api/v1/auth/logout",HTTP_POST,[]{sendSession(false);JsonDocument r;r["ok"]=true;reply(200,r);});
+  web.on("/api/v1/auth/password",HTTP_PUT,[]{
+    if(!auth())return;JsonDocument d;if(!body(d))return;
+    String user=d["user"]|"",password=d["password"]|"",current=d["current"]|"";user.trim();
+    if(passwordSet()&&!keyAuthorized()&&passwordHash(current,panelSalt)!=panelHash){error(403,"Текущий пароль не подходит");return;}
+    if(!validLogin(user,password)){error(400,"Логин до 32 символов, пароль от 8 до 64");return;}
+    setPanelPassword(user,password,0);sendSession(true);JsonDocument r;r["ok"]=true;reply(200,r);
+  });
   web.on("/",HTTP_GET,[]{web.sendHeader("Content-Encoding","gzip");web.sendHeader("Cache-Control","no-cache");web.sendHeader("X-Content-Type-Options","nosniff");web.send_P(200,"text/html; charset=utf-8",(const char*)WEB_UI,sizeof(WEB_UI));});
   web.on("/api/v1/state",HTTP_GET,[]{if(auth())state();});
   web.on("/api/v1/status",HTTP_POST,[]{
@@ -906,6 +1001,8 @@ void setup(){
   token=prefs.getString("token","");apPassword=prefs.getString("ap","");
   if(token.isEmpty()){token=randomHex(24);prefs.putString("token",token);}
   if(apPassword.isEmpty()){apPassword=randomHex(8);prefs.putString("ap",apPassword);}
+  panelUser=prefs.getString("pUser","");panelSalt=prefs.getString("pSalt","");panelHash=prefs.getString("pHash","");
+  if(prefs.getBytes("sessKey",sessionKey,sizeof sessionKey)!=sizeof sessionKey)newSessionKey();
   {
     const esp_partition_t* running=esp_ota_get_running_partition();esp_ota_img_states_t ota;
     otaPending=running&&esp_ota_get_state_partition(running,&ota)==ESP_OK&&ota==ESP_OTA_IMG_PENDING_VERIFY;

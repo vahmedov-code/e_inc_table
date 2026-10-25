@@ -13,7 +13,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 </style></head><body>
 <header class="bar"><div class="bar-in"><div class="brand">avior<span> / sign</span></div><div class="pills"><span class="pill" id="battery" hidden></span><span class="pill" id="connection">Устройство не подключено</span><span class="pill" id="deviceState" role="status">Подключитесь, чтобы узнать состояние</span></div></div></header>
 <main>
-<section class="card login" id="login"><h2>Подключиться к вывеске</h2><p class="muted" style="margin-top:8px">Введите ключ доступа из Serial Monitor. Он хранится только на время этой вкладки.</p><form id="loginForm"><label for="token">Ключ доступа</label><div class="actions"><input id="token" type="password" required autocomplete="off"><button class="primary">Подключиться</button></div></form></section>
+<section class="card login" id="login" hidden><h2 id="loginTitle">Вход в панель вывески</h2><p class="muted" id="loginHint" style="margin-top:8px">Введите логин и пароль панели.</p><form id="loginForm"><div class="form-grid"><label>Логин<input id="loginUser" autocomplete="username" maxlength="32" required></label><label>Пароль<input id="loginPass" type="password" autocomplete="current-password" maxlength="64" required></label><label id="loginPass2Box" hidden>Пароль ещё раз<input id="loginPass2" type="password" autocomplete="new-password" maxlength="64"></label></div><div class="actions"><button class="primary" id="loginSubmit">Войти</button></div></form><details><summary>Войти по ключу API</summary><form id="keyForm"><label for="token">Ключ API — из Serial Monitor или из CRM («Вывеска на двери» → «Вывеска»)</label><div class="actions"><input id="token" type="password" required autocomplete="off"><button>Войти по ключу</button></div></form></details></section>
 <div class="layout">
 <section class="card"><div class="head"><h2 id="previewTitle">Закрыто</h2><span class="tag" id="previewSource">Стандартная картинка</span></div><div class="preview"><canvas id="preview" width="800" height="480" aria-label="Предпросмотр вывески 800 на 480 пикселей"></canvas></div><div class="meta"><span>800 × 480 · чёрный, белый, жёлтый, красный</span><span id="actual">На экране: неизвестно</span></div></section>
 <section class="card"><h2>Статус на двери</h2>
@@ -40,7 +40,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <h3 style="margin-top:20px">Avior CRM</h3><p class="muted" id="crmStatus">Не подключено.</p><label class="check"><input id="crmEnabled" type="checkbox"><span>Управлять вывеской из CRM: «Инструменты» → «Вывеска на двери». Вывеска сама опрашивает CRM раз в ~10 секунд.</span></label><div class="form-grid"><label>Адрес CRM<input id="crmUrl" type="url" maxlength="120" value="https://cms.avior.moscow"></label><label>Токен вывески из CRM<input id="crmToken" type="password" autocomplete="off" maxlength="128" placeholder="пусто — оставить прежний"></label></div><div class="actions"><button id="saveCrm">Сохранить связь с CRM</button></div>
 <h3 style="margin-top:20px">QR-код на стандартных картинках</h3><label class="check"><input id="qrEnabled" type="checkbox" checked><span>Показывать QR-код справа на «Открыто», «Закрыто» и «Скоро буду». На своих картинках его нет.</span></label><div class="form-grid"><label>Ссылка<input id="qrUrl" type="url" maxlength="160" value="https://avior.moscow/na-svyazi/"></label><button id="saveQr" style="align-self:end">Сохранить QR-код</button></div>
 <h3 style="margin-top:20px">Обновление прошивки</h3><p class="muted" id="fwStatus">Версия неизвестна.</p><div class="actions"><label class="filebtn">Выбрать firmware.bin<input id="fwFile" type="file" accept=".bin,application/octet-stream"></label><button class="primary" id="fwUpload">Загрузить и перезапустить</button></div><progress id="fwProgress" max="1" value="0" hidden style="width:100%;margin-top:10px"></progress><p class="caption">Файл из <code>.pio\build\esp32-m075-v3\firmware.bin</code> после сборки. Новая версия первую минуту проверяется: если вывеска за это время перезагрузится, автоматически вернётся прежняя.</p>
-<h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><button id="disconnect">Забыть ключ в этой вкладке</button></section>
+<h3 style="margin-top:20px">Аккумулятор</h3><p id="batteryInfo">Данных пока нет.</p><p class="caption" id="adcProbe"></p><h3 style="margin-top:20px">Интеграция с Avior CRM</h3><p>Локальный API версии 1 готов для внешнего адаптера. <code>POST /api/v1/status {"status":"open"}</code> с заголовком Authorization: Bearer. Подробности — в docs/API.md. Не открывайте панель в интернет.</p><h3 style="margin-top:20px">Вход в панель</h3><p class="muted" id="panelLogin">Логин и пароль панели. Забыли пароль — держите кнопку на плате 10 секунд: пароль сбросится, точка доступа включится, и новый пароль можно задать с телефона. Задать пароль можно и из CRM.</p><form id="passwordForm"><div class="form-grid"><label>Текущий пароль<input id="pwCurrent" type="password" autocomplete="current-password" maxlength="64"></label><label>Логин<input id="pwUser" autocomplete="username" maxlength="32" required></label><label>Новый пароль<input id="pwNew" type="password" autocomplete="new-password" minlength="8" maxlength="64" required></label><label>Новый пароль ещё раз<input id="pwNew2" type="password" autocomplete="new-password" maxlength="64" required></label></div><div class="actions"><button id="savePassword">Сменить пароль</button><button type="button" id="disconnect">Выйти</button></div></form></section>
 <section class="card tabpanel" id="tabLog" role="tabpanel" hidden><div class="schedule-head"><div><h2>Журнал вывески</h2><p class="muted" style="margin:6px 0 0">Перезапуски и их причины, пропадания Wi‑Fi, ошибки связи с CRM, обновления экрана и прошивки. Последние 64 события хранятся в памяти вывески и не пропадают при перезагрузке и отключении питания; при связи с CRM они копируются в её журнал.</p></div><div class="actions"><button id="loadLog">Обновить</button><button id="downloadLog">Скачать .txt</button></div></div><p class="caption" id="logStatus" role="status">Журнал загрузится при открытии вкладки.</p><ol class="log" id="eventLog"></ol></section>
 </main><footer><span id="version">AviorSign</span><span>ESP32-M075 V3.0 / GDEM075F53</span></footer>
 <div id="feedback" class="toast" role="status" aria-live="polite" hidden></div>
@@ -52,16 +52,17 @@ const work=document.createElement('canvas');work.width=800;work.height=480;const
 let qrRows=null,qrKey='',settingsShown=false,crmShown=false,powerShown=false,draftBytes=null,builtinsTried=false;
 // Built-in templates as the sign stores them (GET /builtin), and the square they keep for the QR code.
 const builtins={},QR_BOX={x:681,y:290,size:99};
-let selected='closed',key=sessionStorage.getItem('aviorKey')||'',state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
+let selected='closed',key=sessionStorage.getItem('aviorKey')||'',loggedIn=false,setupMode=false,state=null,draft=false,operation=false,toastTimer=0,assetsLoading=false;
 // Saved frame per slot: Uint8Array, null when the device has none, undefined before the first check.
 const assets={};
 const palette=[[0,0,0],[255,255,255],[255,213,0],[196,30,35]];
 function feedback(text,bad=false){const t=$('feedback');t.hidden=false;t.className='toast'+(bad?' error':'');t.textContent=text;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{t.hidden=true;},bad?12000:6000);}
 async function api(path,method='GET',data){
- if(!key)throw Error('Введите ключ доступа из Serial Monitor.');
- const opts={method,headers:{Authorization:'Bearer '+key},cache:'no-store'};
+ const opts={method,headers:key?{Authorization:'Bearer '+key}:{},cache:'no-store',credentials:'same-origin'};
  if(data instanceof FormData)opts.body=data;else if(data!==undefined){opts.headers['Content-Type']='application/json';opts.body=JSON.stringify(data);}
- const r=await fetch('/api/v1/'+path,opts);if(!r.ok){let d;try{d=await r.json();}catch{}throw Error(d?.error||'Ошибка устройства: '+r.status);}return r;
+ const r=await fetch('/api/v1/'+path,opts);
+ if(r.status===401&&!path.startsWith('auth/')&&loggedIn){loggedIn=false;showLogin();}
+ if(!r.ok){let d;try{d=await r.json();}catch{}throw Error(d?.error||'Ошибка устройства: '+r.status);}return r;
 }
 async function run(fn){if(operation)return;operation=true;try{await fn();}catch(e){feedback(e.message,true);}finally{operation=false;}}
 // The built-in frame of a status: the template from the sign, or a rough stand-in until it loads.
@@ -183,7 +184,7 @@ function showBattery(){
  const p=state?.adcProbe;$('adcProbe').textContent=p?'Входы, мВ: '+Object.entries(p).map(([pin,mv])=>'GPIO'+pin+' '+mv).join(' · '):'';
 }
 async function refresh(){
- state=await(await api('state')).json();$('login').hidden=true;
+ state=await(await api('state')).json();$('login').hidden=true;if(state.panelUser&&!$('pwUser').value)$('pwUser').value=state.panelUser;
  $('connection').textContent=state.wifiConnected?'В сети · '+state.ip:state.wifiStatus==='associated'?'Офисный Wi-Fi · ожидается IP':state.wifiStatus==='unknown'?'Состояние офисного Wi-Fi неизвестно':'Точка доступа · '+state.apIP;
  $('actual').textContent='На экране: '+(labels[state.displayed]||'неизвестно');
  const busy=!state.recovery&&state.busy;
@@ -251,7 +252,31 @@ async function saveDraft(){
  const bytes=draftBytes,f=new FormData();f.append('file',new Blob([bytes],{type:'application/octet-stream'}),'sign.frame');
  await api('assets?slot='+selected,'POST',f);assets[selected]=bytes;draft=false;setSource('Сохранённая картинка');drawThumb(selected);updateButtons();
 }
-$('loginForm').onsubmit=e=>{e.preventDefault();run(async()=>{key=$('token').value.trim();await refresh();sessionStorage.setItem('aviorKey',key);$('token').value='';await readSchedule();feedback('Вывеска подключена.');});};
+// Login: the sign tells whether a password exists; the first one can be set only from its own
+// access point, with the API key or from the CRM.
+async function showLogin(){
+ let a={};try{a=await(await fetch('/api/v1/auth',{cache:'no-store',credentials:'same-origin',headers:key?{Authorization:'Bearer '+key}:{}})).json();}catch{}
+ if(a.loggedIn){await enter();return;}
+ setupMode=!!a.setup;$('login').hidden=false;$('loginPass2Box').hidden=!setupMode;
+ $('loginTitle').textContent=setupMode?'Задайте логин и пароль панели':'Вход в панель вывески';
+ $('loginHint').textContent=!setupMode?'Введите логин и пароль панели. Забыли пароль — держите кнопку на плате 10 секунд.':a.setupAllowed?'Пароль ещё не задан. Придумайте логин и пароль (от 8 символов): дальше вход будет по ним.':'Пароль ещё не задан. Задайте его в CRM («Вывеска на двери» → «Вывеска») или подключитесь телефоном к точке доступа вывески (кнопка на плате 1 секунда) и откройте эту страницу.';
+ $('loginSubmit').textContent=setupMode?'Сохранить и войти':'Войти';
+ $('loginPass').autocomplete=setupMode?'new-password':'current-password';
+ if(a.user)$('loginUser').value=a.user;
+}
+async function enter(){loggedIn=true;await refresh();await readSchedule();}
+$('loginForm').onsubmit=e=>{e.preventDefault();run(async()=>{
+ const user=$('loginUser').value.trim(),password=$('loginPass').value;
+ if(setupMode){if(password.length<8)throw Error('Пароль — не короче 8 символов.');if(password!==$('loginPass2').value)throw Error('Пароли не совпадают.');}
+ await api(setupMode?'auth/setup':'auth/login','POST',{user,password});
+ $('loginPass').value='';$('loginPass2').value='';await enter();feedback(setupMode?'Пароль задан. Вход по нему держится 30 дней.':'Вы вошли.');
+});};
+$('keyForm').onsubmit=e=>{e.preventDefault();run(async()=>{key=$('token').value.trim();loggedIn=true;try{await refresh();}catch(err){key='';loggedIn=false;throw err;}sessionStorage.setItem('aviorKey',key);$('token').value='';await readSchedule();feedback('Вывеска подключена по ключу.');});};
+$('passwordForm').onsubmit=e=>{e.preventDefault();run(async()=>{
+ const password=$('pwNew').value;if(password.length<8)throw Error('Пароль — не короче 8 символов.');if(password!==$('pwNew2').value)throw Error('Пароли не совпадают.');
+ await api('auth/password','PUT',{current:$('pwCurrent').value,user:$('pwUser').value.trim(),password});
+ ['pwCurrent','pwNew','pwNew2'].forEach(id=>$(id).value='');feedback('Пароль сменён.');
+});};
 $('publish').onclick=()=>run(async()=>{
  if(draft)await saveDraft();
  if(selected==='image'&&!assets.image)throw Error('Сначала загрузите и сохраните своё изображение.');
@@ -317,7 +342,7 @@ $('saveQr').onclick=()=>run(async()=>{
 });
 function firstByte(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(new Uint8Array(r.result)[0]);r.onerror=()=>reject(Error('Не удалось прочитать файл.'));r.readAsArrayBuffer(file.slice(0,1));});}
 function sendFirmware(file){return new Promise((resolve,reject)=>{
- const x=new XMLHttpRequest();x.open('POST','/api/v1/firmware');x.setRequestHeader('Authorization','Bearer '+key);
+ const x=new XMLHttpRequest();x.open('POST','/api/v1/firmware');if(key)x.setRequestHeader('Authorization','Bearer '+key);
  x.upload.onprogress=e=>{if(e.lengthComputable)$('fwProgress').value=e.loaded/e.total;};
  x.onload=()=>{let d={};try{d=JSON.parse(x.responseText);}catch{}x.status===200?resolve(d):reject(Error(d.error||'Ошибка загрузки: '+x.status));};
  x.onerror=()=>reject(Error('Связь прервалась во время загрузки. Прежняя прошивка осталась на месте.'));
@@ -344,12 +369,12 @@ $('downloadLog').onclick=()=>run(async()=>{
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([lines.join('\r\n')+'\r\n'],{type:'text/plain;charset=utf-8'}));
  a.download='aviorsign-log-'+new Date().toISOString().slice(0,10)+'.txt';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 });
-$('disconnect').onclick=()=>{sessionStorage.removeItem('aviorKey');key='';state=null;$('login').hidden=false;$('connection').textContent='Устройство отключено';feedback('Ключ удалён из вкладки.');};
+$('disconnect').onclick=()=>run(async()=>{try{await api('auth/logout','POST');}catch{}sessionStorage.removeItem('aviorKey');key='';loggedIn=false;state=null;$('connection').textContent='Устройство отключено';await showLogin();feedback('Вы вышли.');});
 document.querySelectorAll('[role=tab]').forEach(t=>t.addEventListener('click',()=>{
  document.querySelectorAll('[role=tab]').forEach(x=>{const on=x===t;x.setAttribute('aria-selected',on);$(x.getAttribute('aria-controls')).hidden=!on;});
- if(t.getAttribute('aria-controls')==='tabLog'&&key)run(loadLog);
+ if(t.getAttribute('aria-controls')==='tabLog'&&loggedIn)run(loadLog);
 }));
 slots.forEach(drawThumb);select(selected);
-if(key)run(async()=>{await refresh();await readSchedule();});
-setInterval(()=>{if(key&&!document.hidden&&!operation)refresh().catch(()=>{$('connection').textContent=state?.busy?'Экран обновляется · Wi‑Fi вернётся примерно через 25 с':'Связь потеряна · данные устарели';});},5000);
+showLogin();
+setInterval(()=>{if(loggedIn&&!document.hidden&&!operation)refresh().catch(()=>{$('connection').textContent=state?.busy?'Экран обновляется · Wi‑Fi вернётся примерно через 25 с':'Связь потеряна · данные устарели';});},5000);
 </script></body></html>
