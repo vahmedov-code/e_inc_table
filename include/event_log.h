@@ -169,7 +169,7 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
     case EV_ACCESS_POINT:
       if(e.code<0)appendf(out,size,"Точка доступа не включилась");
       else if(e.code==0)appendf(out,size,"Точка доступа выключена: офисная сеть на связи");
-      else appendf(out,size,"Точка доступа включена: %s",e.value==AP_NO_NETWORK?"нет сохранённой сети":e.value==AP_BUTTON?"кнопка на плате":"офисная сеть пропала больше минуты");
+      else appendf(out,size,"Точка доступа включена: %s",e.value==AP_NO_NETWORK?"нет сохранённой сети":e.value==AP_BUTTON?"кнопка на корпусе":"офисная сеть пропала больше минуты");
       break;
     case EV_CRM_ERROR:
       if(e.extra==CRM_FAIL_ANSWER)appendf(out,size,"CRM прислала непонятный ответ (код %d)",e.code);
@@ -205,7 +205,7 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
       break;
     case EV_ACCESS:
       if(e.code==ACCESS_SET)appendf(out,size,"Логин и пароль панели заданы (%s)",e.value==1?"из CRM":e.value==2?"первая настройка":"в панели");
-      else if(e.code==ACCESS_RESET)appendf(out,size,"Пароль панели сброшен кнопкой на плате");
+      else if(e.code==ACCESS_RESET)appendf(out,size,"Пароль панели сброшен кнопкой на корпусе");
       else appendf(out,size,"5 неверных паролей подряд — вход в панель закрыт на минуту");
       break;
     case EV_DROPPED:

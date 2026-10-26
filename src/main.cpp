@@ -156,6 +156,10 @@ void stayAwake(uint32_t ms){if((int32_t)(millis()+ms-awakeUntil)>0)awakeUntil=mi
 // board button for a second. It is never dropped while a phone is still connected to it.
 constexpr uint32_t AP_BUTTON_MS=600000,AP_FALLBACK_MS=60000;
 uint32_t apUntil=0,staLostAt=0,buttonDownAt=0;
+// The key on the case presses the board's reset (EN), which reads as a power-on: quick presses
+// are counted across resets in NVS. Two within 10 s of each other turn the access point on for
+// 10 minutes, three also clear the panel password.
+constexpr uint32_t QUICK_PRESS_MS=10000;uint8_t quickPresses=0;bool quickCleared=false;
 // A freshly updated image stays pending until it has run for OTA_CONFIRM_MS; a reset
 // before that makes the bootloader return to the previous image.
 extern "C" bool verifyRollbackLater(){return true;}
@@ -809,7 +813,7 @@ void routes(){
   });
   web.on("/api/v1/auth/setup",HTTP_POST,[]{
     JsonDocument d;if(!body(d))return;
-    if(passwordSet()){error(409,"Пароль уже задан — войдите или сбросьте его кнопкой на плате (держать 10 секунд)");return;}
+    if(passwordSet()){error(409,"Пароль уже задан — войдите, задайте новый в CRM или нажмите кнопку на корпусе 3 раза подряд");return;}
     if(!onAccessPoint()&&!keyAuthorized()){error(403,"Первый пароль задаётся из CRM или с телефона, подключённого к точке доступа вывески");return;}
     String user=d["user"]|"",password=d["password"]|"";user.trim();
     if(!validLogin(user,password)){error(400,"Логин до 32 символов, пароль от 8 до 64");return;}
@@ -1088,6 +1092,11 @@ void setup(){
    bool hasCurve=prefs.isKey("batCurve")&&prefs.getBytes("batCurve",curve,sizeof curve)==sizeof curve;
    if(!setBatteryCalibration(scale,hasCurve?curve:nullptr,false))setBatteryCalibration(1000,nullptr,false);}
   awakeUntil=millis()+BUTTON_AWAKE_MS;
+  if(!RECOVERY_MODE&&bootReason==ESP_RST_POWERON){
+    quickPresses=prefs.getUChar("quick",0)+1;prefs.putUChar("quick",quickPresses);
+    if(quickPresses>=2){apUntil=millis()+AP_BUTTON_MS;awakeUntil=millis()+AP_BUTTON_MS;logEvent(EV_ACCESS_POINT,1,AP_BUTTON);}
+    if(quickPresses>=3&&passwordSet()){panelHash="";prefs.remove("pHash");newSessionKey();logEvent(EV_ACCESS,ACCESS_RESET);}
+  }
   pinMode(0,INPUT_PULLUP); // board button: BOOT strap at reset, setup button afterwards
   WiFi.onEvent(onWifiDisconnect,ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   bool apOK=startRadio();
@@ -1112,6 +1121,7 @@ void loop(){
     Serial.printf("[power] sleep test done%s battery_mv=%d\n",button?" (button)":"",batteryMv);
   }
   pollButton();
+  if(!quickCleared&&millis()>=QUICK_PRESS_MS){quickCleared=true;if(quickPresses)prefs.putUChar("quick",0);}
   if(powerSave&&!RECOVERY_MODE)powerSaveStep();
   if(scanActive&&millis()-scanStarted>30000&&WiFi.scanComplete()!=WIFI_SCAN_RUNNING){WiFi.scanDelete();scanActive=false;}
   if(pendingJob>=0&&millis()-pendingSince>=RADIO_OFF_GRACE_MS){

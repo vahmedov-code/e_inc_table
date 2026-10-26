@@ -51,7 +51,7 @@ int main(){
   expect(text(ev(EV_CHARGE,3,4250,7860)),"Аккумулятор заряжен за 2 ч 11 мин, АКБ 4,25 В");
   expect(text(ev(EV_CHARGE,1,4180)),"USB отключён, работа от аккумулятора, АКБ 4,18 В");
   expect(text(ev(EV_ACCESS,ACCESS_SET,1)),"Логин и пароль панели заданы (из CRM)");
-  expect(text(ev(EV_ACCESS,ACCESS_RESET)),"Пароль панели сброшен кнопкой на плате");
+  expect(text(ev(EV_ACCESS,ACCESS_RESET)),"Пароль панели сброшен кнопкой на корпусе");
   expect(text(ev(EV_DROPPED,0,17)),"Пропущено событий: 17 — их было слишком много подряд");
   // A short buffer still ends on a whole letter.
   char small[40];eventText(ev(EV_RENDER_ABORT,4,9),small,sizeof small);
