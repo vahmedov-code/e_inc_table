@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.5: manual status until the next event, charge state in battery mode
+
+Owner report: the 21:00 «Закрыто» did not happen on 26.10. The CRM journal shows a manual «Открыто» at 13:28 UTC, which turned the schedule off, and the battery history has no wake at 21:00. A manual status now holds only until the next event. The same history showed «charging» for 17 hours on battery: in battery mode a wake lasts 10–15 s while charge samples were taken only after 20 s, so the state never changed; now each wake takes one sample before the radio starts. The CRM journal showed MySQL (UTC) times as local; it now converts with UNIX_TIMESTAMP. Host tests cover the override and single-sample steps. Not yet run on the board.
+
 ## Update 0.4.4: login and password instead of the key
 
 `tools/test_ui.cjs` covers the login screen, a wrong password, the session without a key, the first setup with a password mismatch, and logout; the key login stays. The CRM computes PBKDF2 with PHP `hash_pbkdf2`, checked against Python `hashlib.pbkdf2_hmac`; the firmware uses mbedTLS `mbedtls_pkcs5_pbkdf2_hmac` with the same parameters, not yet run on the board. Firmware 1,247,377 bytes, 95 % of the OTA slot.

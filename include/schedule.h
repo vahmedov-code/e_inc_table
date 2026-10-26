@@ -11,6 +11,21 @@ constexpr int scheduledStatus(const Event* events,int count,int weekday,int minu
   }
   return result;
 }
+// Minutes since the event now in effect started (0..10079), or -1 without events.
+constexpr int minutesSinceEvent(const Event* events,int count,int weekday,int minute) {
+  if(count==0) return -1;
+  int now=weekday*1440+minute, best=10081;
+  for(int i=0;i<count;i++) {
+    int age=(now-events[i].day*1440-events[i].minute+10080)%10080;
+    if(age<best) best=age;
+  }
+  return best;
+}
+// A manual status set at manualAt (unix) holds until the next event: while the event in effect
+// started before it. secondsSinceEvent counts from the start of that event.
+constexpr bool manualHolds(uint32_t manualAt,uint32_t now,uint32_t secondsSinceEvent){
+  return manualAt&&now>=manualAt&&now-manualAt<secondsSinceEvent;
+}
 // Minutes until the next event in the cyclic week (1..10080; an event at this very
 // minute counts as a week ahead), or -1 without events. Used to time the battery-mode wake.
 constexpr int minutesToNextEvent(const Event* events,int count,int weekday,int minute) {

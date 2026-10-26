@@ -20,5 +20,12 @@ int main(){
   assert(!parse(R"({"enabled":true,"utcOffsetMinutes":180,"events":[{"day":1,"minute":1440,"status":"open"}]})",n,o,e));
   assert(!parse(R"({"enabled":true,"utcOffsetMinutes":900,"events":[{"day":1,"minute":540,"status":"open"}]})",n,o,e));
   assert(!parse(R"({"enabled":true,"utcOffsetMinutes":180,"events":{}})",n,o,e));
-  puts("Schedule parser (host, real ArduinoJson): PASS");
+  // Manual status until the next event: Mon 10:00 open, Mon 21:00 closed.
+  {Event w[2]={{1,600,0},{1,1260,1}};
+   assert(minutesSinceEvent(w,2,1,1200)==600&&minutesSinceEvent(w,2,1,1261)==1&&minutesSinceEvent(w,2,1,599)==9419);
+   uint32_t at=1800000000; // pressed at Mon 13:28, the open event in effect started 208 min before
+   assert(manualHolds(at,at+3600,(208+60)*60));        // 14:28: still manual
+   assert(!manualHolds(at,at+27720,2*60));            // 21:10: the 21:00 event started after the press
+   assert(!manualHolds(0,at,100));}
+  puts("Schedule parser and manual override (host, real ArduinoJson): PASS");
 }

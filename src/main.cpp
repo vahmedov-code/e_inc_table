@@ -47,6 +47,7 @@ const char* names[]={"Открыто","Закрыто","Скоро буду","И
 const char* keys[]={"open","closed","soon","image"};
 Event events[32];int eventCount=0,utcOffset=180,desired=1,displayed=-1;
 bool automatic=false,confirmed=false,fsReady=false;
+uint32_t manualAt=0; // unix time of a manual status: it holds until the next schedule event
 String displayError="",source="manual";
 uint32_t lastRefresh=0,lastTick=0;
 std::atomic<bool> rendering(false);
@@ -252,10 +253,14 @@ void trackWifi(){
 // near a refresh, a wake or a radio start are skipped: the load change would look like USB.
 ChargeTracker charge;uint32_t chargeSince=0;int chargeSamples=0; // trusted samples since the last wake
 void applyPower(int source);
+void chargeChanged(ChargeState before);
 void trackCharge(){
   if(batteryPin<0||rendering||radioPaused)return;
   if((lastRefresh&&millis()-lastRefresh<30000)||millis()-wokeAt<20000||millis()-radioOnAt<20000)return;
-  ChargeState before=charge.state,now=charge.update(millis(),batteryRawMv);chargeSamples++;
+  ChargeState before=charge.state;charge.update(millis(),batteryRawMv);chargeSamples++;chargeChanged(before);
+}
+void chargeChanged(ChargeState before){
+  ChargeState now=charge.state;
   if(now==before)return;
   if(now==CHARGE_ON)chargeSince=millis();
   if(before!=CHARGE_UNKNOWN||now!=CHARGE_OFF) // the first estimate after boot is no event
@@ -378,6 +383,14 @@ void clearRenderBlock(){
   if(RECOVERY_MODE||interruptedPhase==PHASE_IDLE)return;
   interruptedPhase=PHASE_IDLE;tracePrefs.putUChar("blocked",PHASE_IDLE);
 }
+// A manual status keeps the schedule on and holds until its next event; without a set clock
+// that moment is unknown, so the schedule is turned off as before.
+void setManual(int s,const char* from){
+  desired=s;source=from;prefs.putInt("desired",s);displayError="";clearRenderBlock();
+  time_t now=time(nullptr);
+  if(now>1700000000)manualAt=now;else{automatic=false;manualAt=0;}
+  prefs.putUInt("manualAt",manualAt);saveSchedule();
+}
 #if !AVIOR_RECOVERY
 void renderPhase(uint8_t p){
   tracePrefs.putUChar("phase",p);
@@ -457,7 +470,7 @@ void state(){
   JsonDocument d;d["version"]=FW_VERSION;d["recovery"]=RECOVERY_MODE;d["mode"]=MODE_NAME;d["wifiSetupAllowed"]=canMutate(true);d["resetReason"]=resetName(bootReason);d["resetReasonCode"]=(int)bootReason;d["board"]="ESP32-M075 V3.0";d["panel"]="GDEM075F53 / JD79665CA";
   d["desired"]=keys[desired];d["displayed"]=displayed<0?"unknown":keys[displayed];d["busy"]=rendering.load();
   d["displayError"]=displayError;d["hardwareConfirmed"]=confirmed;d["storageReady"]=fsReady;
-  d["automatic"]=automatic;d["source"]=source;d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"0.0.0.0";d["apIP"]=WiFi.softAPIP().toString();
+  d["automatic"]=automatic;d["manualUntilEvent"]=automatic&&manualAt>0;d["source"]=source;d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"0.0.0.0";d["apIP"]=WiFi.softAPIP().toString();
   d["wifiConnected"]=wifi.state()==StationState::Connected;d["wifiStatus"]=stationStateName(wifi.state());
   d["wifiArduinoStatus"]=wifi.evidence.arduinoStatus;d["wifiAssociated"]=wifi.evidence.associated;
   d["wifiNetifUp"]=wifi.evidence.interfaceUp;d["wifiHasAddress"]=wifi.evidence.hasAddress;
@@ -501,7 +514,7 @@ void crmMarkApplied(int item,uint32_t seq){crmApplied[item]=seq;crmPrefs.putUInt
 String crmReport(){
   JsonDocument d;WifiSnapshot wifi=wifiSnapshot();
   d["version"]=FW_VERSION;d["mode"]=MODE_NAME;d["desired"]=keys[desired];d["displayed"]=displayed<0?"unknown":keys[displayed];
-  d["busy"]=rendering.load();d["displayError"]=displayError;d["automatic"]=automatic;d["source"]=source;
+  d["busy"]=rendering.load();d["displayError"]=displayError;d["automatic"]=automatic;d["manualUntilEvent"]=automatic&&manualAt>0;d["source"]=source;
   d["uptimeSeconds"]=millis()/1000;d["resetReason"]=resetName(bootReason);d["heap"]=ESP.getFreeHeap();d["otaPending"]=otaPending;
   d["ip"]=wifi.state()==StationState::Connected?wifi.address.toString():"";d["rssi"]=WiFi.RSSI();
   d["interruptedPhase"]=phaseName(interruptedPhase);d["storageReady"]=fsReady;
@@ -621,7 +634,7 @@ bool crmApply(JsonDocument& r){
   auto applySchedule=[&]{
     if(scheduleSeq<=crmApplied[1])return;
     JsonDocument sd;sd.set(r["schedule"]["value"]);Event next[32];int n,offset;
-    if(parseSchedule(sd,next,n,offset)){memcpy(events,next,n*sizeof(Event));eventCount=n;utcOffset=offset;automatic=sd["enabled"];if(automatic)source="schedule";saveSchedule();changed=true;}
+    if(parseSchedule(sd,next,n,offset)){memcpy(events,next,n*sizeof(Event));eventCount=n;utcOffset=offset;automatic=sd["enabled"];if(automatic)source="schedule";manualAt=0;prefs.putUInt("manualAt",0);saveSchedule();changed=true;}
     else crmError="Расписание из CRM не прошло проверку";
     crmMarkApplied(1,scheduleSeq);
   };
@@ -629,7 +642,7 @@ bool crmApply(JsonDocument& r){
     if(statusSeq<=crmApplied[0])return;
     int s=statusIndex(r["status"]["value"]|"");
     if(s==3&&!(fsReady&&LittleFS.exists(assetPath(3))))crmError="В CRM выбрано «Своё изображение», но на вывеске его нет";
-    else if(s>=0){desired=s;automatic=false;source="crm";prefs.putInt("desired",s);saveSchedule();displayError="";clearRenderBlock();changed=true;}
+    else if(s>=0){setManual(s,"crm");changed=true;}
     crmMarkApplied(0,statusSeq);
   };
   if(statusSeq<scheduleSeq){applyStatus();applySchedule();}else{applySchedule();applyStatus();}
@@ -750,8 +763,10 @@ void afterWake(bool button,const char* reason){
   awakeUntil=millis()+(button?BUTTON_AWAKE_MS:TIMER_AWAKE_MS);
   bool crmOn=crmEnabled&&crmToken.length();
   timeSyncWanted=!ntpSyncedAt||millis()-ntpSyncedAt>3600000UL;crmDoneThisWake=!crmOn;
+  // One quiet battery sample before the radio starts: the same load at every wake.
+  sampleBattery();if(batteryPin>=0){ChargeState before=charge.state;charge.update(millis(),batteryRawMv,true);chargeChanged(before);}
   if(button||crmOn||timeSyncWanted){startRadio();if(timeSyncWanted)sntp_restart();}
-  sampleBattery();Serial.printf("[power] wake %s radio=%d battery_mv=%d\n",wakeReason,WiFi.getMode()!=WIFI_OFF,batteryMv);
+  Serial.printf("[power] wake %s radio=%d battery_mv=%d\n",wakeReason,WiFi.getMode()!=WIFI_OFF,batteryMv);
 }
 bool refreshDue(){
   return confirmed&&desired!=displayed&&displayError.isEmpty()&&!blocksAutoRender(interruptedPhase)&&!(desired==3&&!fsReady);
@@ -762,9 +777,8 @@ void powerSaveStep(){
   bool window=(int32_t)(millis()-awakeUntil)<0;
   bool busy=rendering||pendingJob>=0||otaBusy||restartAt||scanActive||radioPaused;
   bool netPending=!crmDoneThisWake||(timeSyncWanted&&(int32_t)(ntpSyncedAt-wokeAt)<0);
-  bool sampling=powerAuto&&batteryPin>=0&&chargeSamples<3; // auto mode: notice USB plugged in while asleep
   if(busy)return;
-  if(window&&(sessionWake||netPending||sampling||refreshDue()))return;
+  if(window&&(sessionWake||netPending||refreshDue()))return;
   if(!window&&refreshDue()&&(uint32_t)(millis()-awakeUntil)<120000)return; // the 60 s refresh cooldown
   afterWake(lightSleep(secondsToWake()),"timer");
 }
@@ -825,13 +839,13 @@ void routes(){
     if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
     int s=statusIndex(d["status"].as<String>());if(s<0){error(400,"Неизвестный статус");return;}
     if(s==3&&(!fsReady||!LittleFS.exists(assetPath(3)))){error(409,"Сначала загрузите изображение");return;}
-    desired=s;automatic=false;source="manual";prefs.putInt("desired",s);saveSchedule();displayError="";clearRenderBlock();requestDisplay();state();
+    setManual(s,"manual");requestDisplay();state();
   });
   web.on("/api/v1/schedule",HTTP_GET,[]{if(!auth())return;JsonDocument d;scheduleJson(d);reply(200,d);});
   web.on("/api/v1/schedule",HTTP_PUT,[]{
     if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;Event next[32];int n,offset;
     if(!parseSchedule(d,next,n,offset)){error(400,"Проверьте дни, время, статусы и отсутствие одинаковых событий");return;}
-    memcpy(events,next,n*sizeof(Event));eventCount=n;utcOffset=offset;automatic=d["enabled"];saveSchedule();reply(200,d);
+    memcpy(events,next,n*sizeof(Event));eventCount=n;utcOffset=offset;automatic=d["enabled"];manualAt=0;prefs.putUInt("manualAt",0);saveSchedule();reply(200,d);
   });
   web.on("/api/v1/clock",HTTP_POST,[]{
     if(!auth()||!writable())return;JsonDocument d;if(!body(d))return;
@@ -1030,6 +1044,7 @@ void setup(){
   confirmed=!RECOVERY_MODE&&prefs.getBool("hardware",false);desired=constrain(prefs.getInt("desired",1),0,3);
   JsonDocument d;String stored=prefs.getString("schedule","");int n,offset;
   if(!deserializeJson(d,stored)&&parseSchedule(d,events,n,offset)){eventCount=n;utcOffset=offset;automatic=d["enabled"];}
+  manualAt=prefs.getUInt("manualAt",0);
   {
     // Recovery only reads the trace, so the evidence survives until normal firmware returns.
     Preferences trace;trace.begin("avior-trace",RECOVERY_MODE);
@@ -1112,7 +1127,14 @@ void loop(){
     if(r.ok){displayed=r.status;displayError="";clearRenderBlock();}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
   if(millis()-lastTick>1000){
     lastTick=millis();manageAccessPoint();trackWifi();logTick();time_t now=time(nullptr);
-    if(automatic&&now>1700000000){source="schedule";now+=utcOffset*60;tm t;gmtime_r(&now,&t);int s=scheduledStatus(events,eventCount,t.tm_wday,t.tm_hour*60+t.tm_min);if(s>=0&&desired!=s){desired=s;displayError="";}}
+    if(automatic&&now>1700000000){
+      time_t local=now+utcOffset*60;tm t;gmtime_r(&local,&t);int minute=t.tm_hour*60+t.tm_min;
+      int s=scheduledStatus(events,eventCount,t.tm_wday,minute),age=minutesSinceEvent(events,eventCount,t.tm_wday,minute);
+      if(!manualHolds(manualAt,now,age*60+t.tm_sec)){
+        if(manualAt){manualAt=0;prefs.putUInt("manualAt",0);}
+        source="schedule";if(s>=0&&desired!=s){desired=s;displayError="";}
+      }
+    }
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();
   }
   if(!crmWaitReason()&&millis()-crmLastTry>=crmIntervalMs)crmSync();

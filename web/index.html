@@ -24,7 +24,7 @@ main{max-width:1320px;margin:auto;padding:20px 24px}h2{font-size:19px;letter-spa
 <button class="tile" data-status="image" aria-pressed="false"><canvas width="160" height="96" data-thumb="image"></canvas><span><i class="dot image"></i>Своё изображение<small data-kind="image">не загружено</small></span></button>
 </div>
 <button class="primary full" id="publish"><span>Показать «<span id="publishName">Закрыто</span>» на вывеске</span></button>
-<p class="caption">Ручной выбор отключает расписание. Обновление экрана занимает около 25 секунд, Wi‑Fi на это время выключается; между обновлениями — не меньше минуты.</p>
+<p class="caption">Ручной выбор держится до следующего события расписания, потом расписание снова управляет само. Обновление экрана занимает около 25 секунд, Wi‑Fi на это время выключается; между обновлениями — не меньше минуты.</p>
 <div class="picture"><h3>Картинка для «<span id="slotName">Закрыто</span>»</h3>
 <div class="notice" id="storageNotice" hidden>Чтобы сохранять свои картинки, один раз подготовьте хранилище. Будет отформатирован только раздел картинок 0x290000–0x3FFFFF; настройки и прошивка не затрагиваются.<label class="check"><input id="confirmStorage" type="checkbox"><span>Разрешаю отформатировать раздел картинок</span></label><button id="initStorage">Подготовить хранилище</button></div>
 <div class="actions"><label class="filebtn" id="fileLabel">Выбрать файл…<input id="imageFile" type="file" accept="image/png,image/jpeg"></label><button class="primary" id="saveImage">Сохранить картинку</button><button id="resetImage">Вернуть стандартную</button></div>
