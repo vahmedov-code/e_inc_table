@@ -21,6 +21,10 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/md.h>
 #include <mbedtls/pkcs5.h>
+#include <esp_spi_flash.h>
+#include <esp32/rom/spi_flash.h>
+#include <esp_heap_caps.h>
+#include "partition_tables.h"
 #include "wifi_state.h"
 #include "runtime_mode.h"
 #include "board.h"
@@ -188,8 +192,8 @@ bool makeQr(const String& text){
 const char* DEFAULT_CRM_URL="https://cms.avior.moscow";
 bool crmEnabled=false;String crmUrl=DEFAULT_CRM_URL,crmToken,crmError;
 uint32_t crmLastTry=0,crmLastOk=0,crmIntervalMs=10000;bool crmEverOk=false;
-const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery","firmware","panel"};
-constexpr int CRM_ITEM_COUNT=12;
+const char* CRM_ITEMS[]={"status","schedule","qr","open","closed","soon","image","power","wake","battery","firmware","panel","memory"};
+constexpr int CRM_ITEM_COUNT=13;
 uint32_t crmApplied[CRM_ITEM_COUNT]={0};
 uint32_t crmEventsAck=0; // last event-log seq the CRM confirmed it stored
 Preferences crmPrefs;
@@ -580,6 +584,57 @@ bool setBatteryCalibration(int scale,const int16_t* curve,bool persist=true){
   Serial.printf("[battery] calibration scale=%d curve=%d\n",scale,batteryCurveSet);
   return true;
 }
+// Larger firmware slots over the air (CRM item "memory", partitions-big.csv). Done at the next
+// boot, before the radio and the filesystem start, from the first slot (0x10000), whose start
+// does not move. The table at 0x8000 is one sector the normal flash API refuses to write, so
+// the ROM routines write it with the caches stopped, then it is read back and compared. A reset
+// within that ~0.1 s would leave the board for a USB install (AviorSign-0.4.7-usb-big-memory).
+constexpr uint32_t TABLE_ADDR=0x8000,TABLE_BYTES=3072,BIG_SLOT=0x1A0000;
+static IRAM_ATTR bool writeTableRaw(const uint32_t* data){
+  const spi_flash_guard_funcs_t* g=spi_flash_guard_get();
+  g->start();
+  bool ok=esp_rom_spiflash_erase_sector(TABLE_ADDR/4096)==ESP_ROM_SPIFLASH_RESULT_OK&&
+          esp_rom_spiflash_write(TABLE_ADDR,data,TABLE_BYTES)==ESP_ROM_SPIFLASH_RESULT_OK;
+  g->end();
+  return ok;
+}
+bool writeTable(const uint8_t* table){
+  uint32_t* buf=(uint32_t*)heap_caps_malloc(TABLE_BYTES,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);uint8_t* check=(uint8_t*)malloc(TABLE_BYTES);bool ok=false;
+  if(buf&&check){
+    memcpy(buf,table,TABLE_BYTES);
+    for(int i=0;i<3&&!ok;i++){writeTableRaw(buf);ok=spi_flash_read(TABLE_ADDR,check,TABLE_BYTES)==ESP_OK&&!memcmp(check,table,TABLE_BYTES);}
+  }
+  free(buf);free(check);return ok;
+}
+// Copies the running image (second slot) into the first one and boots it, so the next boot can
+// change the table. Same version, so no trial.
+bool copyToFirstSlot(){
+  const esp_partition_t* run=esp_ota_get_running_partition();
+  const esp_partition_t* first=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,nullptr);
+  if(!run||!first||first==run||first->size<run->size)return false;
+  esp_ota_handle_t h;if(esp_ota_begin(first,run->size,&h)!=ESP_OK)return false;
+  static uint8_t buf[4096];bool ok=true;
+  for(uint32_t off=0;ok&&off<run->size;off+=sizeof buf)ok=esp_partition_read(run,off,buf,sizeof buf)==ESP_OK&&esp_ota_write(h,buf,sizeof buf)==ESP_OK;
+  if(esp_ota_end(h)!=ESP_OK)ok=false;
+  return ok&&esp_ota_set_boot_partition(first)==ESP_OK;
+}
+// At boot, with the "migrate" mark from the CRM command. The mark is removed first, so a
+// failure can never repeat on its own.
+void migrateLayout(){
+  uint8_t step=prefs.getUChar("migrate",0);if(!step)return;
+  prefs.remove("migrate");
+  const esp_partition_t* run=esp_ota_get_running_partition();
+  if(!run||run->size>=BIG_SLOT)return;
+  if(otaPending){esp_ota_mark_app_valid_cancel_rollback();otaPending=false;}
+  if(run->address!=0x10000){
+    if(step==1&&copyToFirstSlot()){prefs.putUChar("migrate",2);Serial.println("[memory] moved to the first slot, restarting");Serial.flush();ESP.restart();}
+    logEvent(EV_OTA,OTA_LAYOUT_FAIL,0,1);return;
+  }
+  Serial.println("[memory] writing the larger-slot partition table");Serial.flush();
+  if(writeTable(BIG_TABLE)){logEvent(EV_OTA,OTA_LAYOUT,BIG_SLOT);Serial.flush();delay(200);ESP.restart();}
+  bool restored=writeTable(FACTORY_TABLE);
+  logEvent(EV_OTA,OTA_LAYOUT_FAIL,0,restored);
+}
 // Firmware uploaded in the CRM: streamed into the inactive OTA slot, checked against its
 // SHA-256 and by the image check of Update before it may boot.
 int crmFwFails=0;
@@ -670,6 +725,14 @@ bool crmApply(JsonDocument& r){
     if(user.length()&&user.length()<=32&&isHex(salt,32)&&isHex(hash,64))savePanelLogin(user,salt,hash,1);
     else crmError="Логин панели из CRM не прошёл проверку";
     crmMarkApplied(11,seq);
+  }
+  // Larger firmware slots, ordered from the CRM: only with enough charge, done at the next boot.
+  seq=r["memory"]["seq"]|0;
+  if(seq>crmApplied[12]){
+    const esp_partition_t* run=esp_ota_get_running_partition();
+    if(RECOVERY_MODE||!run||run->size>=BIG_SLOT)crmMarkApplied(12,seq);
+    else if(batteryPin>=0&&percentNow()<30&&charge.state!=CHARGE_ON&&charge.state!=CHARGE_FULL){crmMarkApplied(12,seq);logEvent(EV_OTA,OTA_LAYOUT_LATER);}
+    else if(!rendering&&!radioPaused&&!restartAt&&!otaBusy){crmMarkApplied(12,seq);prefs.putUChar("migrate",1);restartAt=millis()+1500;Serial.println("[memory] layout change at the next boot");}
   }
   // Firmware from the CRM, last: on success the sign restarts into it. A recovery build would
   // cut the CRM link, so the CRM never offers one; the version check is a second guard.
@@ -1046,6 +1109,7 @@ void setup(){
   crmEnabled=!RECOVERY_MODE&&crmPrefs.getBool("on",false);crmUrl=crmPrefs.getString("url",DEFAULT_CRM_URL);crmToken=crmPrefs.getString("token","");
   for(int i=0;i<CRM_ITEM_COUNT;i++)crmApplied[i]=crmPrefs.getUInt(CRM_ITEMS[i],0);
   crmEventsAck=crmPrefs.getUInt("evAck",0);if(crmEventsAck>=logNext)crmEventsAck=0; // the log was cleared
+  if(!RECOVERY_MODE)migrateLayout();
   qrEnabled=prefs.getBool("qrOn",true);qrUrl=prefs.getString("qrUrl",DEFAULT_QR_URL);
   if(!makeQr(qrUrl)){qrUrl=DEFAULT_QR_URL;makeQr(qrUrl);}
   confirmed=!RECOVERY_MODE&&prefs.getBool("hardware",false);desired=constrain(prefs.getInt("desired",1),0,3);

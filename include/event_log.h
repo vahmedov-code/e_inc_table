@@ -40,7 +40,7 @@ enum : uint8_t {CRM_FAIL_HTTP=0,CRM_FAIL_ANSWER,CRM_FAIL_ADDRESS};
 // EV_OTA steps (code).
 // EV_ACCESS steps (code); for ACCESS_SET value is the source: 0 panel, 1 CRM, 2 first setup.
 enum : uint8_t {ACCESS_SET=1,ACCESS_RESET,ACCESS_LOCKED};
-enum : uint8_t {OTA_RECEIVED=0,OTA_INSTALLED,OTA_ROLLED_BACK,OTA_CONFIRMED,OTA_FAILED,OTA_REVERTED};
+enum : uint8_t {OTA_RECEIVED=0,OTA_INSTALLED,OTA_ROLLED_BACK,OTA_CONFIRMED,OTA_FAILED,OTA_REVERTED,OTA_LAYOUT,OTA_LAYOUT_FAIL,OTA_LAYOUT_LATER};
 
 // "0.4.0" -> 400, so a version fits a record field.
 inline int32_t versionNumber(const char* v){int a=0,b=0,c=0;sscanf(v,"%d.%d.%d",&a,&b,&c);return a*10000+b*100+c;}
@@ -188,6 +188,9 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
       version(e.value,a,sizeof a);version(e.extra,b,sizeof b);
       if(e.code==OTA_RECEIVED)appendf(out,size,e.extra==1?"Скачана прошивка из CRM, %d КБ — перезапуск":"Получена прошивка, %d КБ — перезапуск",(int)(e.value/1024));
       else if(e.code==OTA_FAILED)appendf(out,size,"Прошивка из CRM не скачалась после 3 попыток");
+      else if(e.code==OTA_LAYOUT)appendf(out,size,"Память перераспределена: разделы прошивки по %d КБ — перезапуск",(int)(e.value/1024));
+      else if(e.code==OTA_LAYOUT_FAIL)appendf(out,size,e.extra?"Перераспределить память не удалось — осталась прежняя раскладка":"Перераспределить память не удалось, прежняя таблица тоже не записалась — нужна заливка по USB");
+      else if(e.code==OTA_LAYOUT_LATER)appendf(out,size,"Перераспределение памяти отложено: заряд меньше 30 %% и нет USB");
       else if(e.code==OTA_REVERTED)appendf(out,size,e.extra==1?"Прошивка %s не вышла на связь с CRM за 10 минут — возврат к прежней":"Прошивка %s перезапускалась без остановки — возврат к прежней",a);
       else if(e.code==OTA_INSTALLED)appendf(out,size,"Установлена прошивка %s (была %s)",a,b);
       else if(e.code==OTA_ROLLED_BACK)appendf(out,size,"Новая прошивка не запустилась — работает прежняя %s",a);

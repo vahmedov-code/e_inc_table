@@ -42,6 +42,9 @@ int main(){
   expect(text(ev(EV_OTA,OTA_RECEIVED,1195781)),"Получена прошивка, 1167 КБ — перезапуск");
   expect(text(ev(EV_OTA,OTA_RECEIVED,1238448,1)),"Скачана прошивка из CRM, 1209 КБ — перезапуск");
   expect(text(ev(EV_OTA,OTA_REVERTED,403,1)),"Прошивка 0.4.3 не вышла на связь с CRM за 10 минут — возврат к прежней");
+  expect(text(ev(EV_OTA,OTA_LAYOUT,0x1A0000)),"Память перераспределена: разделы прошивки по 1664 КБ — перезапуск");
+  expect(text(ev(EV_OTA,OTA_LAYOUT_FAIL,0,1)),"Перераспределить память не удалось — осталась прежняя раскладка");
+  expect(text(ev(EV_OTA,OTA_LAYOUT_LATER)),"Перераспределение памяти отложено: заряд меньше 30 % и нет USB");
   expect(text(ev(EV_OTA,OTA_FAILED,0)),"Прошивка из CRM не скачалась после 3 попыток");
   expect(text(ev(EV_BATTERY,12,3480)),"Низкий заряд: 12 %, АКБ 3,48 В");
   expect(text(ev(EV_POWER,1,1)),"Экономия заряда включена (из CRM)");
