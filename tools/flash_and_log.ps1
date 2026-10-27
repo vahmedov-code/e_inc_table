@@ -6,7 +6,7 @@ param(
   [string]$Backup = 'C:\AviorSign\gooddisplay_factory_backup.bin',
   # Previously recorded backup SHA256; if omitted it is computed, as in docs/RECOVERY.md.
   [string]$Sha256,
-  [ValidateSet('esp32-m075-v3','esp32-m075-recovery','esp32-m075-recovery-wifi')]
+  [ValidateSet('esp32-m075-v3','esp32-m075-v3-big','esp32-m075-recovery','esp32-m075-recovery-wifi')]
   [string]$Environment = 'esp32-m075-v3'
 )
 $ErrorActionPreference = 'Stop'

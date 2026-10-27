@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--backup', required=True, type=Path)
 parser.add_argument('--sha256', required=True, help='Previously recorded SHA256 of the factory backup')
 parser.add_argument('--port', help='Explicit serial port, e.g. COM5')
-parser.add_argument('--environment', choices=['esp32-m075-v3','esp32-m075-recovery','esp32-m075-recovery-wifi'], default='esp32-m075-v3')
+parser.add_argument('--environment', choices=['esp32-m075-v3','esp32-m075-v3-big','esp32-m075-recovery','esp32-m075-recovery-wifi'], default='esp32-m075-v3')
 parser.add_argument('--write', action='store_true', help='Actually replace bootloader, partition table, OTA selection and app0')
 args = parser.parse_args()
 backup = args.backup.resolve(strict=True)
@@ -25,7 +25,7 @@ build = root / '.pio/build' / args.environment
 for name in ('bootloader.bin','partitions.bin','firmware.bin'):
     if not (build/name).is_file():
         parser.error('Build first: python -m platformio run -e ' + args.environment)
-if (build/'firmware.bin').stat().st_size > 0x140000:
+if (build/'firmware.bin').stat().st_size > (0x1A0000 if args.environment == 'esp32-m075-v3-big' else 0x140000):
     parser.error('Firmware exceeds app partition.')
 print('Backup verified. Build exists. This does not validate wiring, panel identity or secure boot.')
 if not args.write:
@@ -34,8 +34,11 @@ if not args.write:
 if not args.port:
     parser.error('--write requires --port; automatic port selection is forbidden.')
 print('LOCAL FLASH: verify ESP32-D0WD, 4MB, no flash encryption/secure boot, stable USB power.')
-print('This replaces firmware and OTA selection. Existing NVS and filesystem are preserved.')
-confirmation = {'esp32-m075-v3':'FLASH AVIOR F53','esp32-m075-recovery':'FLASH AVIOR RECOVERY','esp32-m075-recovery-wifi':'FLASH AVIOR RECOVERY WIFI'}[args.environment]
+print('This replaces firmware and OTA selection. Existing NVS is preserved.')
+if args.environment == 'esp32-m075-v3-big':
+    print('NEW PARTITION TABLE: larger firmware slots. Settings, Wi-Fi, password and log stay;')
+    print('the picture storage moves and is formatted at first boot, pictures return from the CRM.')
+confirmation = {'esp32-m075-v3':'FLASH AVIOR F53','esp32-m075-v3-big':'FLASH AVIOR BIG','esp32-m075-recovery':'FLASH AVIOR RECOVERY','esp32-m075-recovery-wifi':'FLASH AVIOR RECOVERY WIFI'}[args.environment]
 print('Selected environment:', args.environment)
 if input('Type ' + confirmation + ' to continue: ') != confirmation:
     sys.exit('Cancelled without writing.')

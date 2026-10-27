@@ -489,6 +489,7 @@ void state(){
   {auto c=d["crm"].to<JsonObject>();c["enabled"]=crmEnabled;c["url"]=crmUrl;c["configured"]=crmToken.length()>0;c["error"]=crmError;
    if(const char* wait=crmWaitReason())c["waiting"]=wait;
    if(crmEverOk)c["lastOkSeconds"]=(millis()-crmLastOk)/1000;}
+  {const esp_partition_t* p=esp_ota_get_running_partition();d["otaSlot"]=p?p->size:0;}
   d["minHeap"]=esp_get_minimum_free_heap_size();d["workerStackFree"]=workerStackFree.load();
   {auto l=d["log"].to<JsonObject>();l["next"]=logNext;l["boot"]=bootCount;nvs_stats_t st;
    if(nvs_get_stats(nullptr,&st)==ESP_OK){l["nvsUsed"]=st.used_entries;l["nvsFree"]=st.free_entries;}}
@@ -526,6 +527,7 @@ String crmReport(){
   if(powerSave)d["awakeSeconds"]=(int32_t)(awakeUntil-millis())>0?(awakeUntil-millis())/1000:0;
   if(batteryPin>=0){auto b=d["battery"].to<JsonObject>();b["pin"]=batteryPin;b["mv"]=batteryMv;b["raw"]=batteryRawMv;b["percent"]=percentNow();b["charge"]=chargeName(charge.state);b["scale"]=batteryScale;b["curve"]=batteryCurveSet;}
   auto q=d["qr"].to<JsonObject>();q["enabled"]=qrEnabled;q["url"]=qrUrl;
+  {const esp_partition_t* p=esp_ota_get_running_partition();d["otaSlot"]=p?p->size:0;}
   d["localKey"]=token; // the API key and the access point password, shown in the CRM to owner and admins only
   d["apKey"]=apPassword;d["panelUser"]=passwordSet()?panelUser:"";
   JsonDocument sched;scheduleJson(sched);d["schedule"]=sched;
@@ -583,7 +585,8 @@ bool setBatteryCalibration(int scale,const int16_t* curve,bool persist=true){
 int crmFwFails=0;
 bool crmFirmware(uint32_t seq,JsonObjectConst f){
   uint32_t size=f["size"]|0;String sha=f["sha256"]|"";
-  if(size<100000||size>0x140000||sha.length()!=64){crmError="Прошивка в CRM не прошла проверку";return false;}
+  const esp_partition_t* slot=esp_ota_get_next_update_partition(nullptr);
+  if(size<100000||!slot||size>slot->size||sha.length()!=64){crmError="Прошивка в CRM не прошла проверку или больше раздела";return false;}
   Serial.printf("[ota] downloading %s from the CRM, %u bytes\n",(const char*)(f["version"]|"?"),(unsigned)size);
   otaBusy=true;bool ok=false;
   HTTPClient http;WiFiClientSecure tls;WiFiClient plain;
@@ -1077,6 +1080,17 @@ void setup(){
   }else{
   Serial.println("[boot] phase=filesystem");Serial.flush();
   fsReady=LittleFS.begin(false,"/littlefs",5,"littlefs"); // Never auto-format the factory filesystem.
+  {
+    // A picture partition of another size than the factory one (0x170000) is ours: after the
+    // larger-slot layout (partitions-big.csv) it starts empty, so it is formatted and the CRM
+    // is asked for the pictures again.
+    const esp_partition_t* fs=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"littlefs");
+    if(!fsReady&&fs&&fs->size!=0x170000){
+      fsReady=LittleFS.format()&&LittleFS.begin(false,"/littlefs",5,"littlefs");
+      Serial.printf("[boot] new picture partition %u bytes formatted: %d\n",(unsigned)fs->size,fsReady);
+      if(fsReady)for(int i=3;i<=6;i++)crmMarkApplied(i,0);
+    }
+  }
 #if !AVIOR_RECOVERY
   tracePrefs.begin("avior-trace",false);
   jobs=xQueueCreate(1,sizeof(int));results=xQueueCreate(1,sizeof(Result));

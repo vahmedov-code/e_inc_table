@@ -1,0 +1,10 @@
+# Larger firmware slots (0.4.7+): 1.625 MB each instead of 1.25 MB; pictures keep 704 KB
+# (four 96000-byte frames and a temporary copy need about 500 KB). NVS (settings, Wi-Fi,
+# password, log) stays where it is. Installed once over USB: tools\flash_and_log.ps1
+# -Environment esp32-m075-v3-big. The picture partition is formatted at the first boot and
+# the pictures come back from the CRM.
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x1A0000,
+app1,     app,  ota_1,   0x1B0000,0x1A0000,
+littlefs, data, spiffs,  0x350000,0xB0000,

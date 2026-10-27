@@ -350,7 +350,8 @@ function sendFirmware(file){return new Promise((resolve,reject)=>{
 });}
 $('fwUpload').onclick=()=>run(async()=>{
  const file=$('fwFile').files[0];if(!file)throw Error('Выберите файл firmware.bin.');
- if(file.size<100000||file.size>0x140000)throw Error('Размер не похож на прошивку AviorSign (нужен firmware.bin до 1,25 МБ).');
+ const slot=state?.otaSlot||0x140000;
+ if(file.size<100000||file.size>slot)throw Error('Размер не похож на прошивку AviorSign (нужен firmware.bin до '+(slot/1048576).toFixed(2).replace('.',',')+' МБ).');
  if(await firstByte(file)!==0xE9)throw Error('Это не файл прошивки ESP32. Нужен firmware.bin из папки сборки.');
  $('fwProgress').hidden=false;$('fwProgress').value=0;$('fwStatus').textContent='Загрузка прошивки…';
  await sendFirmware(file);
