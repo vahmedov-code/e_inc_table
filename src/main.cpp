@@ -21,8 +21,7 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/md.h>
 #include <mbedtls/pkcs5.h>
-#include <esp_spi_flash.h>
-#include <esp32/rom/spi_flash.h>
+#include <esp_flash.h>
 #include <esp_heap_caps.h>
 #include "partition_tables.h"
 #include "wifi_state.h"
@@ -586,23 +585,22 @@ bool setBatteryCalibration(int scale,const int16_t* curve,bool persist=true){
 }
 // Larger firmware slots over the air (CRM item "memory", partitions-big.csv). Done at the next
 // boot, before the radio and the filesystem start, from the first slot (0x10000), whose start
-// does not move. The table at 0x8000 is one sector the normal flash API refuses to write, so
-// the ROM routines write it with the caches stopped, then it is read back and compared. A reset
-// within that ~0.1 s would leave the board for a USB install (AviorSign-0.4.7-usb-big-memory).
+// does not move. The table at 0x8000 is one sector the flash driver refuses to write for the
+// default chip; a copy of the chip descriptor without the protection hook writes it through the
+// same driver (0.4.8 used the ROM routines with interrupts off and hit the interrupt watchdog
+// before erasing). The table is read back and compared. A reset within that ~0.1 s would leave
+// the board for a USB install (AviorSign-0.4.7-usb-big-memory).
 constexpr uint32_t TABLE_ADDR=0x8000,TABLE_BYTES=3072,BIG_SLOT=0x1A0000;
-static IRAM_ATTR bool writeTableRaw(const uint32_t* data){
-  const spi_flash_guard_funcs_t* g=spi_flash_guard_get();
-  g->start();
-  bool ok=esp_rom_spiflash_erase_sector(TABLE_ADDR/4096)==ESP_ROM_SPIFLASH_RESULT_OK&&
-          esp_rom_spiflash_write(TABLE_ADDR,data,TABLE_BYTES)==ESP_ROM_SPIFLASH_RESULT_OK;
-  g->end();
-  return ok;
-}
 bool writeTable(const uint8_t* table){
-  uint32_t* buf=(uint32_t*)heap_caps_malloc(TABLE_BYTES,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);uint8_t* check=(uint8_t*)malloc(TABLE_BYTES);bool ok=false;
+  esp_flash_os_functions_t os=*esp_flash_default_chip->os_func;os.region_protected=nullptr;
+  esp_flash_t chip=*esp_flash_default_chip;chip.os_func=&os;
+  uint8_t* buf=(uint8_t*)heap_caps_malloc(TABLE_BYTES,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);uint8_t* check=(uint8_t*)malloc(TABLE_BYTES);bool ok=false;
   if(buf&&check){
     memcpy(buf,table,TABLE_BYTES);
-    for(int i=0;i<3&&!ok;i++){writeTableRaw(buf);ok=spi_flash_read(TABLE_ADDR,check,TABLE_BYTES)==ESP_OK&&!memcmp(check,table,TABLE_BYTES);}
+    for(int i=0;i<3&&!ok;i++){
+      if(esp_flash_erase_region(&chip,TABLE_ADDR,4096)!=ESP_OK||esp_flash_write(&chip,buf,TABLE_ADDR,TABLE_BYTES)!=ESP_OK)continue;
+      ok=esp_flash_read(esp_flash_default_chip,check,TABLE_ADDR,TABLE_BYTES)==ESP_OK&&!memcmp(check,table,TABLE_BYTES);
+    }
   }
   free(buf);free(check);return ok;
 }
