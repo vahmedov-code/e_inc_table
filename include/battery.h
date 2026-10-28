@@ -40,19 +40,25 @@ struct ChargeTracker {
   ChargeState state=CHARGE_UNKNOWN;
   static int median3(const int* v){int a=v[0],b=v[1],c=v[2];return a>b?(b>c?b:(a>c?c:a)):(a>c?a:(b>c?c:b));}
   void set(ChargeState s,uint32_t now,int mv){if(s==CHARGE_ON&&state!=CHARGE_ON){peakMv=mv;peakAt=now;}state=s;}
-  // A trusted sample: not during or right after a refresh, a wake or a radio change. single:
-  // the one quiet sample of a battery-mode wake (radio still off), compared on its own with
-  // the median of the three before it, so USB plugged in or out shows at the next wake.
-  static constexpr int SINGLE_STEP_MV=40;
-  ChargeState update(uint32_t now,int mv,bool single=false){
+  // The one quiet sample of a battery-mode wake (radio still off), compared only with the
+  // median of the last three wake samples: with the radio off the reading is 40-50 mV higher
+  // (owner history, 27-29.10), so mixing it with radio-on samples looked like USB at every wake.
+  static constexpr int WAKE_STEP_MV=40;
+  int wake[3]={0};int wakeCount=0;
+  ChargeState wakeSample(uint32_t now,int mv){
+    if(wakeCount==3){
+      int d=mv-median3(wake);
+      if(d>=WAKE_STEP_MV&&state!=CHARGE_ON&&state!=CHARGE_FULL){set(CHARGE_ON,now,mv);wakeCount=0;}
+      else if(d<=-WAKE_STEP_MV&&(state==CHARGE_ON||state==CHARGE_FULL)){set(CHARGE_OFF,now,mv);wakeCount=0;}
+    }
+    if(wakeCount==3){wake[0]=wake[1];wake[1]=wake[2];wakeCount=2;}
+    wake[wakeCount++]=mv;
+    return state;
+  }
+  // A trusted sample: not during or right after a refresh, a wake or a radio change.
+  ChargeState update(uint32_t now,int mv){
     if(count==6){for(int i=0;i<5;i++)recent[i]=recent[i+1];count=5;}
     recent[count++]=mv;
-    if(single&&count>=4){
-      int d=mv-median3(&recent[count-4]);
-      if(d>=SINGLE_STEP_MV||d<=-SINGLE_STEP_MV){
-        set(d>0?CHARGE_ON:CHARGE_OFF,now,mv);recent[0]=recent[1]=recent[2]=mv;count=3;trendMv=mv;trendAt=now;
-      }
-    }
     if(count<3)return state;
     int m=median3(&recent[count-3]);
     if(!trendAt){trendMv=m;trendAt=now;}

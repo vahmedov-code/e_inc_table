@@ -23,11 +23,15 @@ int main(){
    assert(s.run(1800,3790,3770,40)==CHARGE_OFF);}               // discharging with dips is never charging
   {int a[]={5,1,3},b[]={1,1,9},c[]={9,9,1};assert(ChargeTracker::median3(a)==3&&ChargeTracker::median3(b)==1&&ChargeTracker::median3(c)==9);}
   // Battery-mode wakes: one quiet sample each, 15 minutes apart.
-  {ChargeTracker t;uint32_t now=0;auto wake=[&](int mv){now+=900000;return t.update(now,mv,true);};
-   for(int i=0;i<4;i++)wake(4150-i);
+  {ChargeTracker t;uint32_t now=0;auto wake=[&](int mv){now+=900000;return t.wakeSample(now,mv);};
+   t.state=CHARGE_OFF;
+   // Owner history 27-29.10: quiet wake samples ~45 mV above the radio-on ones never mean USB.
+   for(int i=0;i<12;i++){wake(4130-2*i);now+=30000;t.update(now,4085-2*i);t.update(now+5000,4084-2*i);t.update(now+10000,4085-2*i);}
    assert(t.state==CHARGE_OFF);
-   assert(wake(4205)==CHARGE_ON);                                // USB plugged in while asleep: seen at the next wake
-   wake(4210);wake(4212);assert(wake(4150)==CHARGE_OFF);         // unplugged
+   for(int i=0;i<4;i++)wake(4106-i);
+   assert(t.state==CHARGE_OFF);
+   assert(wake(4160)==CHARGE_ON);                                // USB plugged in while asleep: seen at the next wake
+   wake(4165);wake(4168);assert(wake(4105)==CHARGE_OFF);         // unplugged
    assert(wake(4140)==CHARGE_OFF&&wake(4135)==CHARGE_OFF);}     // slow discharge stays discharging
   // Own discharge curve from the CRM: raw mV at 0, 10, ... 100 %.
   {int16_t c[CURVE_POINTS]={3480,3620,3680,3720,3760,3800,3850,3910,3980,4070,4190};

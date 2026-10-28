@@ -832,7 +832,7 @@ void afterWake(bool button,const char* reason){
   bool crmOn=crmEnabled&&crmToken.length();
   timeSyncWanted=!ntpSyncedAt||millis()-ntpSyncedAt>3600000UL;crmDoneThisWake=!crmOn;
   // One quiet battery sample before the radio starts: the same load at every wake.
-  sampleBattery();if(batteryPin>=0){ChargeState before=charge.state;charge.update(millis(),batteryRawMv,true);chargeChanged(before);}
+  sampleBattery();if(batteryPin>=0){ChargeState before=charge.state;charge.wakeSample(millis(),batteryRawMv);chargeChanged(before);}
   if(button||crmOn||timeSyncWanted){startRadio();if(timeSyncWanted)sntp_restart();}
   Serial.printf("[power] wake %s radio=%d battery_mv=%d\n",wakeReason,WiFi.getMode()!=WIFI_OFF,batteryMv);
 }

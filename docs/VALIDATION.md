@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.10: wake samples compared only with wake samples
+
+Owner battery history 27-29.10: from 0.4.5 on, almost every 15-minute wake logged «charging» with battery mode off, then «discharging» about 10 minutes later. The quiet wake sample (radio off) reads 40-50 mV above the radio-on samples it was compared with, so each wake looked like USB plugged in, auto mode kept the sign awake for minutes, and the battery drained about 3.5 times faster (0.7 %/h against 0.2 %/h before). Wake samples now have their own three-sample history. `tools/test_charge.cpp` replays that pattern.
+
 ## Update 0.4.5: manual status until the next event, charge state in battery mode
 
 Owner report: the 21:00 «Закрыто» did not happen on 26.10. The CRM journal shows a manual «Открыто» at 13:28 UTC, which turned the schedule off, and the battery history has no wake at 21:00. A manual status now holds only until the next event. The same history showed «charging» for 17 hours on battery: in battery mode a wake lasts 10–15 s while charge samples were taken only after 20 s, so the state never changed; now each wake takes one sample before the radio starts. The CRM journal showed MySQL (UTC) times as local; it now converts with UNIX_TIMESTAMP. Host tests cover the override and single-sample steps. Not yet run on the board.
