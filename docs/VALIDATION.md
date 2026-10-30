@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Hardware: battery
+
+One 3000 mAh Li-ion cell (owner, 30.10; earlier notes said 3700 mAh by mistake). The owner has a second 3000 mAh cell and may add it in parallel (6000 mAh): equal voltages before joining, a protection board on each cell, and the back cover would need to be deeper.
+
 ## Update 0.4.10: wake samples compared only with wake samples
 
 Owner battery history 27-29.10: from 0.4.5 on, almost every 15-minute wake logged «charging» with battery mode off, then «discharging» about 10 minutes later. The quiet wake sample (radio off) reads 40-50 mV above the radio-on samples it was compared with, so each wake looked like USB plugged in, auto mode kept the sign awake for minutes, and the battery drained about 3.5 times faster (0.7 %/h against 0.2 %/h before). Wake samples now have their own three-sample history. `tools/test_charge.cpp` replays that pattern.
@@ -49,7 +53,7 @@ The production certificate is issued by Let's Encrypt YE2. Neither the container
 ### Battery mode, access point, QR everywhere (same version)
 
 - Light sleep rather than deep sleep: the only button is GPIO0, a boot strap, and a deep-sleep wake while it is held is reported to start the ROM download mode. Light sleep keeps RAM, needs no reboot and wakes on GPIO0 low.
-- Wake budget (estimate, not measured): sleep about 24 mAh/day if the board draws ~1 mA asleep, CRM checks every 15 min about 8–12 mAh/day, refreshes 1–2 mAh/day, so roughly 3 months on 3700 mAh. The board's own sleep current is unknown; `POST /sleeptest` exists to measure it.
+- Wake budget (estimate, not measured): sleep about 24 mAh/day if the board draws ~1 mA asleep, CRM checks every 15 min about 8–12 mAh/day, refreshes 1–2 mAh/day, so roughly 2.5 months on the 3000 mAh cell in theory. The owner history (0.2 %/h before 0.4.5) points to about 3 weeks, so the real sleep current is higher than this estimate. The board's own sleep current is unknown; `POST /sleeptest` exists to measure it.
 - `minutesToNextEvent` (compile-time tests in `src/schedule_checks.cpp`) times the wake for the next schedule event; an hourly SNTP restart corrects the sleep clock.
 - Access point only when needed, per the owner's request; STA-only also lets Wi-Fi use its default modem sleep.
 - Checked: all three environments compile, schedule asserts, UI test (power controls, sleep test, QR overlay shown in previews but absent from uploaded frames). Not run on the board: sleep/wake, real sleep current, button wake, AP switching.
