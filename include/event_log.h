@@ -181,8 +181,11 @@ inline void eventText(const LogRecord& e,char* out,size_t size){
     case EV_CRM_OK:
       durationText(e.value,a,sizeof a);appendf(out,size,"Связь с CRM восстановлена, перерыв %s",a);break;
     case EV_REFRESH:case EV_REFRESH_FAIL:
+      // extra: battery mV in bits 0-15, refresh seconds in 16-23, timed-out stage in 24-31 (0.4.11+)
       appendf(out,size,e.kind==EV_REFRESH?"Экран обновлён: «%s» за %d,%d с":"Экран не обновился: «%s», %d,%d с",statusText(e.code),(int)(e.value/1000),(int)(e.value%1000/100));
-      volts(e.extra);
+      if((e.extra>>24)&0xFF)appendf(out,size,", экран не ответил на этапе «%s»",phaseText((e.extra>>24)&0xFF));
+      if((e.extra>>16)&0xFF)appendf(out,size,", перерисовка %d с",(int)((e.extra>>16)&0xFF));
+      volts(e.extra&0xFFFF);
       break;
     case EV_OTA:
       version(e.value,a,sizeof a);version(e.extra,b,sizeof b);

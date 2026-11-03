@@ -53,9 +53,11 @@ bool automatic=false,confirmed=false,fsReady=false;
 uint32_t manualAt=0; // unix time of a manual status: it holds until the next schedule event
 String displayError="",source="manual";
 uint32_t lastRefresh=0,lastTick=0;
+// One automatic retry after a panel timeout (not after a reset): the next try may be warmer.
+bool refreshRetried=false;
 std::atomic<bool> rendering(false);
 QueueHandle_t jobs,results;
-struct Result {int status;bool ok;};
+struct Result {int status;bool ok;uint8_t failPhase;uint32_t refreshMs;};
 File uploadFile;size_t uploadBytes=0;bool uploadOK=false;String uploadPath;
 uint32_t lastHealth=0;
 esp_reset_reason_t bootReason=ESP_RST_UNKNOWN;
@@ -393,7 +395,7 @@ void clearRenderBlock(){
 // A manual status keeps the schedule on and holds until its next event; without a set clock
 // that moment is unknown, so the schedule is turned off as before.
 void setManual(int s,const char* from){
-  desired=s;source=from;prefs.putInt("desired",s);displayError="";clearRenderBlock();
+  desired=s;source=from;prefs.putInt("desired",s);displayError="";refreshRetried=false;clearRenderBlock();
   time_t now=time(nullptr);
   if(now>1700000000)manualAt=now;else{automatic=false;manualAt=0;}
   prefs.putUInt("manualAt",manualAt);saveSchedule();
@@ -409,7 +411,7 @@ void worker(void*) {
   int s;
   for(;;){
     xQueueReceive(jobs,&s,portMAX_DELAY);bool ok=band!=nullptr;
-    File asset;bool loaded=false,readOk=true;
+    File asset;bool loaded=false,readOk=true;uint8_t failPhase=0;uint32_t refreshMs=0;
     if(ok&&fsReady){asset=LittleFS.open(assetPath(s),"r");loaded=asset&&asset.size()==FRAME_BYTES;}
     if(!loaded && s==3)ok=false;
     if(ok){
@@ -417,10 +419,11 @@ void worker(void*) {
       Panel panel;panel.phase=renderPhase;
       ComposeInput in{s,qrEnabled?&qr:nullptr,batteryPin>=0&&percentNow()<=15};
       ok=panel.show(band,[&](uint8_t* buf,int b){readOk&=composeRows(buf,b*BAND_ROWS,BAND_ROWS,in,loaded?&asset:(File*)nullptr);})&&readOk;
-      renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d\n",ok);
+      failPhase=panel.failPhase;refreshMs=panel.refreshMs;
+      renderPhase(PHASE_IDLE);Serial.printf("[display] complete ok=%d refresh_ms=%lu fail_phase=%u\n",ok,(unsigned long)refreshMs,failPhase);
     }
     workerStackFree=uxTaskGetStackHighWaterMark(nullptr);
-    Result r{s,ok};xQueueSend(results,&r,portMAX_DELAY);
+    Result r{s,ok,failPhase,refreshMs};xQueueSend(results,&r,portMAX_DELAY);
   }
 }
 #endif
@@ -1209,8 +1212,11 @@ void loop(){
   }
   if(results&&xQueueReceive(results,&r,0)==pdTRUE){
     rendering=false;lastRefresh=millis();resumeRadio();
-    logEvent(r.ok?EV_REFRESH:EV_REFRESH_FAIL,r.status,millis()-refreshStartedAt,refreshBatteryMv);
-    if(r.ok){displayed=r.status;displayError="";clearRenderBlock();}else {displayError="Ошибка обновления: проверьте BUSY, питание, F53 и GPIO. Автоповтор отключён.";}}
+    int32_t extra=(refreshBatteryMv&0xFFFF)|(int32_t)(min<uint32_t>(r.refreshMs/1000,255))<<16|(int32_t)r.failPhase<<24;
+    logEvent(r.ok?EV_REFRESH:EV_REFRESH_FAIL,r.status,millis()-refreshStartedAt,extra);
+    if(r.ok){displayed=r.status;displayError="";refreshRetried=false;clearRenderBlock();}
+    else if(r.failPhase&&!refreshRetried){refreshRetried=true;stayAwake(90000);Serial.println("[display] panel timeout, one retry in 60 s");}
+    else {displayError=r.failPhase?String("Экран не ответил на этапе «")+phaseText(r.failPhase)+"» и после повтора. Проверьте шлейф экрана и температуру; выберите статус ещё раз.":"Ошибка обновления: не удалось прочитать картинку. Выберите статус ещё раз.";}}
   if(millis()-lastTick>1000){
     lastTick=millis();manageAccessPoint();trackWifi();logTick();time_t now=time(nullptr);
     if(automatic&&now>1700000000){
@@ -1218,7 +1224,7 @@ void loop(){
       int s=scheduledStatus(events,eventCount,t.tm_wday,minute),age=minutesSinceEvent(events,eventCount,t.tm_wday,minute);
       if(!manualHolds(manualAt,now,age*60+t.tm_sec)){
         if(manualAt){manualAt=0;prefs.putUInt("manualAt",0);}
-        source="schedule";if(s>=0&&desired!=s){desired=s;displayError="";}
+        source="schedule";if(s>=0&&desired!=s){desired=s;displayError="";refreshRetried=false;}
       }
     }
     if(displayError.isEmpty()&&!blocksAutoRender(interruptedPhase))requestDisplay();

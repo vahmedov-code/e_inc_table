@@ -13,17 +13,24 @@ class Panel {
   void reg(uint8_t c,std::initializer_list<uint8_t> values) {
     cmd(c); for(auto b:values) byte(b,true);
   }
-  bool ready() {
+  uint8_t current=0;
+  // Waits for BUSY high. The refresh itself gets longer: the 4-colour panel slows down in the
+  // cold, and owner logs 03-04.11 show it passing 45 s at night (normally about 28 s).
+  bool ready(uint32_t limit=BUSY_LIMIT_MS) {
     delay(10); uint32_t start=millis();
     while(digitalRead(EPD_BUSY)==LOW) {
-      if(millis()-start>45000) return false;
+      if(millis()-start>limit) {if(!failPhase)failPhase=current;return false;}
       delay(10);
     }
+    if(current==PHASE_REFRESH)refreshMs=millis()-start;
     return true;
   }
-  void mark(uint8_t p){if(phase)phase(p);}
+  void mark(uint8_t p){current=p;if(phase)phase(p);}
 public:
+  static constexpr uint32_t BUSY_LIMIT_MS=45000,REFRESH_LIMIT_MS=90000;
   void (*phase)(uint8_t)=nullptr;
+  uint8_t failPhase=0;     // the stage whose BUSY wait timed out first, 0 if none
+  uint32_t refreshMs=0;    // how long the panel took to refresh
   // Protocol verified against Good Display A32-GDEM075F53-F-20260709.
   // Full refresh only. No F52 waveform or controller substitution.
   // fill(buf,band) composes the next band into buf right before it is sent.
@@ -49,7 +56,7 @@ public:
         fill(buf,band);
         for(size_t i=0;i<BAND_BYTES;i++) {byte(buf[i],true);if((i&1023)==0)delay(1);}
       }
-      mark(PHASE_REFRESH);reg(0x12,{0});ok=ready();
+      mark(PHASE_REFRESH);reg(0x12,{0});ok=ready(REFRESH_LIMIT_MS);
     }
     // Always attempt power off and deep sleep, even following a timeout.
     mark(PHASE_POWER_OFF);reg(0x02,{0}); bool poweredOff=ready();

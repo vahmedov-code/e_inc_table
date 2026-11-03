@@ -1,5 +1,9 @@
 # Validation — 2026-10-22
 
+## Update 0.4.11: longer panel refresh limit, one retry
+
+Owner log 03-04.11: three refreshes in a row failed at exactly 48.2 s (battery 4.11-4.15 V), while the same picture normally takes 33.2 s. One 45 s BUSY wait plus the frame transfer gives 48 s, and the power-off wait that follows answered at once, so the panel was alive but its refresh ran past 45 s (night, likely colder; hypothesis). The refresh stage now waits up to 90 s, the other stages keep 45 s. The journal shows how long the refresh took and which stage timed out. After a panel timeout (not after a reset) the sign tries once more 60 s later before showing the error.
+
 ## Hardware: battery
 
 One 3000 mAh Li-ion cell (owner, 30.10; earlier notes said 3700 mAh by mistake). The owner has a second 3000 mAh cell and may add it in parallel (6000 mAh): equal voltages before joining, a protection board on each cell, and the back cover would need to be deeper.
